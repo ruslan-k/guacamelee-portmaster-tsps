@@ -17,7 +17,18 @@ source "$controlfolder/control.txt"
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 get_controls
 
-GAMEDIR=/${directory}/ports/guacamelee
+GAMEDIR=
+for candidate in \
+  /mnt/SDCARD/Data/ports/guacamelee \
+  "${directory:+${directory%/}/guacamelee}" \
+  "${directory:+/${directory#/}/ports/guacamelee}" \
+  /roms/ports/guacamelee /sdcard/ports/guacamelee; do
+  if [ -d "$candidate" ]; then
+    GAMEDIR="$candidate"
+    break
+  fi
+done
+[ -n "$GAMEDIR" ] || { echo "Guacamelee data directory not found" >&2; exit 1; }
 cd "$GAMEDIR" || exit 1
 mkdir -p "$GAMEDIR/conf" "$GAMEDIR/logs" "$GAMEDIR/gamedata"
 LOG="$GAMEDIR/logs/guacamelee.log"
