@@ -136,7 +136,7 @@ if [ "$BRIDGE" -eq 1 ]; then
   echo "bridge_presenter=$PRESENTER"
   echo "bridge_loader=$LD"
   echo "bridge_dimensions=${TSPGL_WIDTH}x${TSPGL_HEIGHT}"
-  "$GPTOKEYB2" "game-bin" -c "$GAMEDIR/guacamelee.ini" &
+  $GPTOKEYB2 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
   pm_platform_helper "$GAMEDIR/box86/box86"
   "$LD" --library-path "$LD_LIBRARY_PATH" "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin"
   result=$?
@@ -147,7 +147,7 @@ else
   export BOX86_LD_LIBRARY_PATH="$GAMEDIR/box86/x86:$GAMEDIR/gamedata/lib32:$GAMEDIR/libs/x86"
   export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es/libGL.so.1"
   export LIBGL_SHRINK=4
-  "$GPTOKEYB2" "game-bin" -c "$GAMEDIR/guacamelee.ini" &
+  $GPTOKEYB2 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
   pm_platform_helper "$GAMEDIR/box86/box86"
   "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin"
   result=$?

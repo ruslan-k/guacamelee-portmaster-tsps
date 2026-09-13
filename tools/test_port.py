@@ -47,8 +47,13 @@ def main() -> int:
     assert not game_names.intersection(tracked_game_files)
 
     source = (ROOT / "src" / "glbridge" / "client.c").read_text()
+    server_source = (ROOT / "src" / "glbridge" / "server_gl.c").read_text()
+    launcher_source = (ROOT / "portmaster" / "Guacamelee.sh").read_text()
     assert 'TSPGL_WIDTH' in source and 'TSPGL_HEIGHT' in source
     assert 'eglQuerySurface' in source
+    assert "src[total++] = '\\n';" in server_source
+    assert '$GPTOKEYB2 "game-bin"' in launcher_source
+    assert '"$GPTOKEYB2"' not in launcher_source
 
     bridge_hashes = {
         hashlib.sha256((PORT / "glbridge" / name).read_bytes()).hexdigest()

@@ -439,6 +439,8 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
             total += (size_t)len;
             p += (uint32_t)len;
         }
+        if (count > 1)
+            total += (size_t)(count - 1);
         src = malloc(total + sizeof(prefix) + 4);
         if (!src)
             return -1;
@@ -457,6 +459,8 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
             memcpy(src + total, p, (size_t)len);
             total += (size_t)len;
             p += (uint32_t)len;
+            if (i + 1 < count)
+                src[total++] = '\n';
         }
         src[total] = 0;
         {
