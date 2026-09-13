@@ -52,5 +52,5 @@ chmod 0755 "$GAME/game-bin"
     echo "Extracted data is missing resources.dat" >&2
     exit 7
 }
-
+rm -f "$INSTALLER"
 echo "Guacamelee game data extraction complete"
