@@ -32,7 +32,7 @@ mkdir -p "$STAGE"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 
 # 7zzs reads the installer as an archive. It does not execute startmojo.sh.
-"$SEVEN" x -y -aoa "$INSTALLER" -o"$STAGE" >/dev/null
+"$SEVEN" x -tzip -y -aoa "$INSTALLER" -o"$STAGE" >/dev/null
 if [ ! -f "$STAGE/data/noarch/game/game-bin" ]; then
     echo "GOG archive did not contain data/noarch/game/game-bin" >&2
     exit 5
