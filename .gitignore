@@ -1,0 +1,7 @@
+build/
+portmaster/dist/
+*.log
+*.log.*
+portmaster/guacamelee/gamedata/*
+!portmaster/guacamelee/gamedata/README.txt
+portmaster/guacamelee/gog_guacamelee_gold_edition_2.0.0.3.sh

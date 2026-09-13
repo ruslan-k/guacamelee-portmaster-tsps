@@ -1,0 +1,29 @@
+{
+  "version": 4,
+  "name": "guacamelee.zip",
+  "items": ["Guacamelee.sh", "guacamelee"],
+  "items_opt": [],
+  "attr": {
+    "title": "Guacamelee! Gold Edition",
+    "porter": ["Ruslan K.", "Cebion", "kotzebuedog"],
+    "desc": "Guacamelee! Gold Edition through Box86, gl4es and a 32-bit to 64-bit GLES bridge on TSPS.",
+    "desc_md": null,
+    "inst": "Copy the legally owned gog_guacamelee_gold_edition_2.0.0.3.sh into the guacamelee folder before launching.",
+    "inst_md": null,
+    "genres": ["action", "platformer"],
+    "image": {},
+    "rtr": false,
+    "exp": true,
+    "runtime": [],
+    "store": [],
+    "availability": "paid",
+    "reqs": ["opengl", "power"],
+    "arch": ["aarch64", "armhf"],
+    "min_glibc": ""
+  },
+  "status": {
+    "source": "https://github.com/ruslan-k/guacamelee-portmaster-tsps",
+    "md5": null,
+    "status": "WIP"
+  }
+}
