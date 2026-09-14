@@ -94,7 +94,7 @@ def main() -> int:
     assert 'GUA-TEX image#' in server_main_source
     assert 'GUA-TEX copy' in server_main_source
     assert 'GUA-DRAW' in server_main_source
-    assert 'GUA-SWAP swap=' in server_main_source
+    assert 'GUA-SWAP-TIME swap=' in server_main_source
     assert 'GUA-PIX swap=' in server_main_source
     assert 'GUA-KHRDBG' in server_main_source
     assert 'GUA-RING' in server_main_source
@@ -113,6 +113,8 @@ def main() -> int:
     assert 'GUACAMELEE_TITLE_STATE_DIAG="${GUACAMELEE_TITLE_STATE_DIAG:-0}"' in launcher_source
     assert 'GUACAMELEE_VAO_DIAG="${GUACAMELEE_VAO_DIAG:-0}"' in launcher_source
     assert 'GUACAMELEE_TITLE_OCCLUSION_DIAG="${GUACAMELEE_TITLE_OCCLUSION_DIAG:-0}"' in launcher_source
+    assert 'GUACAMELEE_FBO_CENSUS="${GUACAMELEE_FBO_CENSUS:-0}"' in launcher_source
+    assert 'GUACAMELEE_FBO_TRANSITION_TRACE="${GUACAMELEE_FBO_TRANSITION_TRACE:-0}"' in launcher_source
     assert 'TSPGL_PRESENT_LAST_FBO="${GUACAMELEE_PRESENT_LAST_FBO:-0}"' in launcher_source
     assert 'TSPGL_PRESENT_SET_READ_BUFFER="${GUACAMELEE_PRESENT_SET_READ_BUFFER:-0}"' in launcher_source
     assert 'TSPGL_HOLD_SWAP="${GUACAMELEE_HOLD_SWAP:-0}"' in launcher_source

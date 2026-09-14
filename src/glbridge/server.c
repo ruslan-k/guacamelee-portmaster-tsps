@@ -318,6 +318,15 @@ static int present_letterbox;
 static int present_last_fbo;
 static int present_set_read_buffer;
 static int present_hold_swap;
+static unsigned char fbo_live[4096];
+static int fbo_census_enabled = -1;
+static unsigned fbo_census_count;
+static int fbo_transition_trace = -1;
+static unsigned fbo_transition_budget;
+static unsigned char fbo_transition_valid[4096];
+static unsigned fbo_transition_prev_nonblack[4096];
+static uint64_t fbo_transition_prev_hash[4096];
+static unsigned char fbo_transition_done[4096];
 uint32_t game_fbo;
 uint32_t game_color;
 uint32_t game_depth;
@@ -2115,6 +2124,228 @@ static int pixel_probe_swap(unsigned swap)
            swap == 300;
 }
 
+static void fbo_census_track(uint32_t op, const uint8_t *in, uint32_t len,
+                             const uint8_t *out, uint32_t out_n)
+{
+    uint32_t i, count;
+    if (op == OP_glGenFramebuffers) {
+        count = out_n / 4u;
+        if (count > 256) count = 256;
+        for (i = 0; i < count; ++i) {
+            uint32_t id;
+            memcpy(&id, out + i * 4u, 4);
+            if (id < 4096) fbo_live[id] = 1;
+        }
+    } else if (op == OP_glDeleteFramebuffers && len >= 4) {
+        memcpy(&count, in, 4);
+        if (count > 256) count = 256;
+        if (4u + count * 4u > len) count = (len - 4u) / 4u;
+        for (i = 0; i < count; ++i) {
+            uint32_t id;
+            memcpy(&id, in + 4u + i * 4u, 4);
+            if (id < 4096) fbo_live[id] = 0;
+        }
+    }
+}
+
+static int fbo_census_checkpoint(unsigned swap)
+{
+    return swap == 10 || swap == 30 || swap == 50 || swap == 100 ||
+           swap == 150 || swap == 200 || swap == 250 || swap == 300 ||
+           swap == 500 || swap == 1000 || swap == 2000 || swap == 4000 ||
+           swap == 6000;
+}
+
+static void fbo_census(unsigned swap)
+{
+    int32_t old_fb = 0, old_buf = GL_BACK, old_pack = 4;
+    void (*getatt)(uint32_t, uint32_t, uint32_t, int32_t *) =
+        (void *)G.glGetFramebufferAttachmentParameteriv;
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+    void (*pixel_store)(uint32_t, int32_t) = (void *)G.glPixelStorei;
+    unsigned id;
+    if (fbo_census_enabled < 0) {
+        const char *v = getenv("GUACAMELEE_FBO_CENSUS");
+        fbo_census_enabled = v && atoi(v) != 0;
+    }
+    if (!fbo_census_enabled || !fbo_census_checkpoint(swap) ||
+        fbo_census_count++ >= 16 || !real_bind_fb || !real_get_integerv ||
+        !real_check_fb || !getatt || !read_pixels)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &old_fb);
+    real_get_integerv(GL_READ_BUFFER, &old_buf);
+    real_get_integerv(GL_PACK_ALIGNMENT, &old_pack);
+    for (id = 1; id < 4096; ++id) {
+        int32_t status, type = 0, object = 0, drawbuf = 0, readbuf = 0;
+        struct { int x, y, w, h; } r[5];
+        uint8_t pixels[32 * 32 * 4];
+        unsigned n = 0, total = 0, k, j;
+        uint64_t hash = 1469598103934665603ULL;
+        if (!fbo_live[id] && id != game_fbo)
+            continue;
+        real_bind_fb(GL_FRAMEBUFFER, id);
+        status = (int32_t)real_check_fb(GL_FRAMEBUFFER);
+        if (getatt) {
+            getatt(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                   GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
+            getatt(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                   GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &object);
+        }
+        real_get_integerv(GL_DRAW_BUFFER0, &drawbuf);
+        real_get_integerv(GL_READ_BUFFER, &readbuf);
+        if (type == (int32_t)GL_TEXTURE && real_read_buffer && pixel_store) {
+            r[0] = (typeof(r[0])){game_w / 2 - 16, game_h / 2 - 16, 32, 32};
+            r[1] = (typeof(r[0])){game_w / 4 - 8, game_h / 4 - 8, 16, 16};
+            r[2] = (typeof(r[0])){3 * game_w / 4 - 8, game_h / 4 - 8, 16, 16};
+            r[3] = (typeof(r[0])){game_w / 4 - 8, 3 * game_h / 4 - 8, 16, 16};
+            r[4] = (typeof(r[0])){3 * game_w / 4 - 8, 3 * game_h / 4 - 8, 16, 16};
+            real_read_buffer(GL_COLOR_ATTACHMENT0);
+            pixel_store(GL_PACK_ALIGNMENT, 1);
+            for (j = 0; j < 5; ++j) {
+                size_t bytes = (size_t)r[j].w * (size_t)r[j].h * 4u;
+                memset(pixels, 0, sizeof(pixels));
+                read_pixels(r[j].x, r[j].y, r[j].w, r[j].h,
+                            GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                total += (unsigned)bytes - (unsigned)(r[j].w * r[j].h);
+                for (k = 0; k < bytes; ++k) {
+                    hash ^= pixels[k]; hash *= 1099511628211ULL;
+                    if ((k % 4u) < 3u && pixels[k]) ++n;
+                }
+            }
+        }
+        fprintf(stderr,
+                "GUA-FBO-CENSUS swap=%u ms=%llu fb=%u status=0x%x "
+                "color-type=0x%x color=%d drawbuf=0x%x readbuf=0x%x "
+                "nonblack=%u/%u hash=%016llx\\n", swap,
+                (unsigned long long)now_ms(), id, (unsigned)status,
+                (unsigned)type, (int)object, (unsigned)drawbuf,
+                (unsigned)readbuf, n, total, (unsigned long long)hash);
+    }
+    real_bind_fb(GL_FRAMEBUFFER, (uint32_t)old_fb);
+    if (real_read_buffer) real_read_buffer((uint32_t)old_buf);
+    if (pixel_store) pixel_store(GL_PACK_ALIGNMENT, old_pack);
+}
+
+static void fbo_transition_after(uint32_t op, const uint8_t *in,
+                                  uint32_t len, uint32_t seq)
+{
+    int32_t fb = 0, old_read = 0, old_draw = 0, old_buf = GL_BACK;
+    int32_t old_pack = 4;
+    int32_t program = 0, blend = 0, eq = 0, src = 0, dst = 0;
+    int32_t color[4] = {0}, vp[4] = {0};
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+    void (*pixel_store)(uint32_t, int32_t) = (void *)G.glPixelStorei;
+    uint8_t pixels[32 * 32 * 4];
+    struct { int x, y, w, h; } r[5];
+    unsigned n = 0, total = 0, j, k;
+    uint64_t hash = 1469598103934665603ULL;
+    uint32_t args[6] = {0};
+    const char *name;
+
+    if (fbo_transition_trace < 0) {
+        const char *v = getenv("GUACAMELEE_FBO_TRANSITION_TRACE");
+        fbo_transition_trace = v && atoi(v) != 0;
+    }
+    if (!fbo_transition_trace ||
+        (op != OP_glClear && op != OP_glDrawArrays &&
+         op != OP_glDrawElements && op != OP_glBlitFramebuffer &&
+         op != OP_glCopyTexImage2D && op != OP_glCopyTexSubImage2D) ||
+        !real_get_integerv || !real_bind_fb || !real_read_buffer ||
+        !read_pixels || !pixel_store)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (fb != 2 && fb != 4)
+        return;
+    if (fbo_transition_budget++ >= 2048 || fbo_transition_done[fb])
+        return;
+    real_get_integerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
+    real_get_integerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
+    real_get_integerv(GL_READ_BUFFER, &old_buf);
+    real_get_integerv(GL_PACK_ALIGNMENT, &old_pack);
+    real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    real_get_integerv(GL_BLEND, &blend);
+    real_get_integerv(GL_BLEND_EQUATION_RGB, &eq);
+    real_get_integerv(GL_BLEND_SRC_RGB, &src);
+    real_get_integerv(GL_BLEND_DST_RGB, &dst);
+    real_get_integerv(GL_COLOR_WRITEMASK, color);
+    real_get_integerv(GL_VIEWPORT, vp);
+    real_bind_fb(GL_READ_FRAMEBUFFER, (uint32_t)fb);
+    real_read_buffer(GL_COLOR_ATTACHMENT0);
+    pixel_store(GL_PACK_ALIGNMENT, 1);
+    r[0] = (typeof(r[0])){game_w / 2 - 16, game_h / 2 - 16, 32, 32};
+    r[1] = (typeof(r[0])){game_w / 4 - 8, game_h / 4 - 8, 16, 16};
+    r[2] = (typeof(r[0])){3 * game_w / 4 - 8, game_h / 4 - 8, 16, 16};
+    r[3] = (typeof(r[0])){game_w / 4 - 8, 3 * game_h / 4 - 8, 16, 16};
+    r[4] = (typeof(r[0])){3 * game_w / 4 - 8, 3 * game_h / 4 - 8, 16, 16};
+    for (j = 0; j < 5; ++j) {
+        size_t bytes = (size_t)r[j].w * (size_t)r[j].h * 4u;
+        memset(pixels, 0, sizeof(pixels));
+        read_pixels(r[j].x, r[j].y, r[j].w, r[j].h,
+                    GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        total += (unsigned)bytes - (unsigned)(r[j].w * r[j].h);
+        for (k = 0; k < bytes; ++k) {
+            hash ^= pixels[k]; hash *= 1099511628211ULL;
+            if ((k % 4u) < 3u && pixels[k]) ++n;
+        }
+    }
+    real_bind_fb(GL_READ_FRAMEBUFFER, (uint32_t)old_read);
+    real_bind_fb(GL_DRAW_FRAMEBUFFER, (uint32_t)old_draw);
+    real_read_buffer((uint32_t)old_buf);
+    pixel_store(GL_PACK_ALIGNMENT, old_pack);
+    if (pixel_swap_count < 100) {
+        fbo_transition_valid[fb] = 1;
+        fbo_transition_prev_nonblack[fb] = n;
+        fbo_transition_prev_hash[fb] = hash;
+        return;
+    }
+    if (!fbo_transition_valid[fb]) {
+        fbo_transition_valid[fb] = 1;
+        fbo_transition_prev_nonblack[fb] = n;
+        fbo_transition_prev_hash[fb] = hash;
+        fprintf(stderr, "GUA-COLOR-SIG seq=%u ms=%llu fb=%d nonblack=%u hash=%016llx\\n",
+                seq, (unsigned long long)now_ms(), (int)fb, n,
+                (unsigned long long)hash);
+        return;
+    }
+    if (!fbo_transition_prev_nonblack[fb] && n) {
+        fprintf(stderr, "GUA-COLOR-SIG seq=%u ms=%llu fb=%d nonblack=%u hash=%016llx\\n",
+                seq, (unsigned long long)now_ms(), (int)fb, n,
+                (unsigned long long)hash);
+    }
+    if (fbo_transition_prev_nonblack[fb] && !n) {
+        unsigned i;
+        for (i = 0; i < 6 && i * 4u + 4u <= len; ++i)
+            memcpy(&args[i], in + i * 4u, 4);
+        switch (op) {
+        case OP_glClear: name = "glClear"; break;
+        case OP_glDrawArrays: name = "glDrawArrays"; break;
+        case OP_glDrawElements: name = "glDrawElements"; break;
+        case OP_glBlitFramebuffer: name = "glBlitFramebuffer"; break;
+        case OP_glCopyTexImage2D: name = "glCopyTexImage2D"; break;
+        default: name = "other"; break;
+        }
+        fprintf(stderr,
+                "GUA-COLOR-TRANS seq=%u ms=%llu fb=%d op=%s before=%u "
+                "after=0 hash_before=%016llx hash_after=%016llx "
+                "program=%d blend=%d eq=0x%x src=0x%x dst=0x%x "
+                "mask=%d%d%d%d vp=%d,%d,%d,%d args=%u,%u,%u,%u,%u,%u\\n",
+                seq, (unsigned long long)now_ms(), (int)fb, name,
+                fbo_transition_prev_nonblack[fb],
+                (unsigned long long)fbo_transition_prev_hash[fb],
+                (unsigned long long)hash, (int)program, (int)blend,
+                (unsigned)eq, (unsigned)src, (unsigned)dst,
+                color[0], color[1], color[2], color[3],
+                vp[0], vp[1], vp[2], vp[3], args[0], args[1], args[2],
+                args[3], args[4], args[5]);
+        fbo_transition_done[fb] = 1;
+    }
+    fbo_transition_prev_nonblack[fb] = n;
+    fbo_transition_prev_hash[fb] = hash;
+    (void)total;
+}
+
 static void present_swap(void)
 {
     void (*blit)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
@@ -2124,6 +2355,8 @@ static void present_swap(void)
     unsigned swap = ++pixel_swap_count;
     uint32_t source_fbo = (present_last_fbo && gl_diag_last_draw_fb) ?
                           gl_diag_last_draw_fb : game_fbo;
+
+    fbo_census(swap);
 
     if (!game_fbo) {
         present_draw_cursor(0, 0, win_w, win_h);
@@ -2211,9 +2444,9 @@ static void present_swap(void)
         int32_t actual_fb = 0;
         if (real_get_integerv)
             real_get_integerv(GL_FRAMEBUFFER_BINDING, &actual_fb);
-        fprintf(stderr, "GUA-SWAP swap=%u bound-fb=%d game-fbo=%u last-draw-fb=%u source-fb=%u\\n",
-                swap, (int)actual_fb, game_fbo, gl_diag_last_draw_fb,
-                source_fbo);
+        fprintf(stderr, "GUA-SWAP-TIME swap=%u ms=%llu bound-fb=%d game-fbo=%u last-draw-fb=%u source-fb=%u\\n",
+                swap, (unsigned long long)now_ms(), (int)actual_fb,
+                game_fbo, gl_diag_last_draw_fb, source_fbo);
     }
     if (blit)
         blit(0, 0, game_w, game_h, dx, dy, dx + dw, dy + dh,
@@ -2394,6 +2627,8 @@ static int handle_client(int fd)
         title_white_texture_end();
         title_white_color_end();
         title_occlusion_end(h.seq);
+        fbo_census_track(h.op, dispatch_in, h.len, out, out_n);
+        fbo_transition_after(h.op, dispatch_in, h.len, h.seq);
         if (h.op == OP_glGetError && out_n >= 4) {
             uint32_t err = 0;
             memcpy(&err, out, 4);
@@ -2575,6 +2810,10 @@ int main(void)
         const char *or = getenv("GUACAMELEE_OP_RING");
         if (or && atoi(or) != 0)
             fprintf(stderr, "GUA-RING enabled\\n");
+    }
+    {
+        const char *fc = getenv("GUACAMELEE_FBO_CENSUS");
+        fbo_census_enabled = fc && atoi(fc) != 0;
     }
     {
         const char *sf = getenv("TSPGL_SWAP_FINISH");
