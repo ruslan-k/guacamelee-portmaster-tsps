@@ -59,6 +59,9 @@ static int sh_line_kind(const char *a, const char *b)
         if (a + 10 <= b && strncmp(a, "#extension", 10) == 0 &&
             sh_has(a, b, "framebuffer_fetch"))
             return 3;
+        if (a + 10 <= b && strncmp(a, "#extension", 10) == 0 &&
+            sh_has(a, b, "GL_IMG_uniform_buffer_object"))
+            return 6;
         return 1;
     }
     if (a + 9 <= b && strncmp(a, "precision", 9) == 0 && sh_has(a, b, "float")) {
@@ -118,7 +121,7 @@ static int sh_tok(const char *s, const char *line, const char *end,
 
 static char *rewrite_gles2_shader(const char *src, size_t slen, int *out_len)
 {
-    int is_frag, use_fetch, to_es3;
+    int is_frag, use_fetch, to_es3, strip_img_ubo;
     const char *p, *end;
     char *out = NULL;
     size_t len = 0, cap = 0;
@@ -133,7 +136,8 @@ static char *rewrite_gles2_shader(const char *src, size_t slen, int *out_len)
               strstr(src, "gl_FragData");
     use_fetch = strstr(src, "gl_LastFragData") != NULL ||
                 strstr(src, "framebuffer_fetch") != NULL;
-    if (strstr(src, "#version 300")) {
+    strip_img_ubo = sh_has(src, end, "GL_IMG_uniform_buffer_object");
+    if (strstr(src, "#version 300") && !strip_img_ubo) {
         *out_len = (int)slen;
         return NULL;
     }
@@ -181,7 +185,7 @@ static char *rewrite_gles2_shader(const char *src, size_t slen, int *out_len)
                     "tspgl-srv: no FB fetch on GPU, LastFragData -> vec4(1.0)\n");
             once = 1;
         }
-    } else if (!use_fetch) {
+    } else if (!use_fetch && !strip_img_ubo) {
         *out_len = (int)slen;
         return NULL;
     }
@@ -193,6 +197,10 @@ static char *rewrite_gles2_shader(const char *src, size_t slen, int *out_len)
         while (eol < end && *eol != '\n')
             eol++;
         kind = sh_line_kind(p, eol);
+        if (kind == 6) {
+            p = (eol < end) ? eol + 1 : eol;
+            continue;
+        }
         if (to_es3 && kind >= 2 && kind <= 5) {
             p = (eol < end) ? eol + 1 : eol;
             continue;

@@ -53,6 +53,7 @@ def main() -> int:
     assert 'TSPGL_WIDTH' in source and 'TSPGL_HEIGHT' in source
     assert 'eglQuerySurface' in source
     assert "src[total++] = '\\n';" in server_source
+    assert 'strip_img_ubo' in server_source
     assert '$GPTOKEYB2 "game-bin"' in launcher_source
     assert '"$GPTOKEYB2"' not in launcher_source
 
