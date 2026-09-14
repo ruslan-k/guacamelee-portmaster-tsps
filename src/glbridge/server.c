@@ -359,6 +359,8 @@ static uint32_t fbo_transition_prev[64];
 static int gl_error_trace = -1;
 static uint32_t deferred_gl_error;
 static unsigned gl_error_trace_count;
+static int title_draw_probe = -1;
+static unsigned title_draw_probe_count;
 static int swap_finish;
 static int swap_interval;
 static uint32_t now_ms(void)
@@ -1010,6 +1012,41 @@ static void gl_error_trace_after(uint32_t op, uint32_t seq)
             seq, gl_diag_op_name(op), op, (int)fb, (int)prog, err);
     ++gl_error_trace_count;
     deferred_gl_error = err;
+}
+
+static void gl_title_draw_probe(uint32_t op, uint32_t seq)
+{
+    const char *v;
+    int32_t fb = 0;
+    uint8_t pixels[16 * 16 * 4];
+    unsigned i, nonblack = 0;
+    uint64_t hash = 1469598103934665603ULL;
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+
+    if (title_draw_probe < 0) {
+        v = getenv("GUACAMELEE_TITLE_DRAW_PROBE");
+        title_draw_probe = v && strcmp(v, "0") != 0;
+    }
+    if (!title_draw_probe || title_draw_probe_count >= 16 ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !read_pixels)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (fb != 2)
+        return;
+    memset(pixels, 0, sizeof(pixels));
+    read_pixels(0, 0, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    for (i = 0; i < sizeof(pixels); ++i) {
+        hash ^= pixels[i];
+        hash *= 1099511628211ULL;
+        if ((i & 3u) != 3u && pixels[i] != 0)
+            ++nonblack;
+    }
+    fprintf(stderr, "GUA-TITLE-PIX draw=%u seq=%u op=%s fb=%d nonblack=%u/768 "
+            "hash=%016llx\\n", title_draw_probe_count++, seq,
+            op == OP_glDrawArrays ? "DrawArrays" : "DrawElements", (int)fb,
+            nonblack, (unsigned long long)hash);
 }
 
 static void gl_diag_fbo_transition(uint32_t op, const uint8_t *in,
@@ -1907,6 +1944,7 @@ static int handle_client(int fd)
         }
         gl_diag_fbo_lifecycle(h.op, in, h.len);
         gl_diag_fbo_transition(h.op, in, h.len);
+        gl_title_draw_probe(h.op, h.seq);
         if (h.op == OP_glFinish)
             tspgl_stage_flip();
         if (rc != 0) {
