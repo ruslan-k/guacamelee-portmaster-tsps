@@ -48,6 +48,7 @@ def main() -> int:
     assert not game_names.intersection(tracked_game_files)
 
     source = (ROOT / "src" / "glbridge" / "client.c").read_text()
+    xport_source = (ROOT / "src" / "glbridge" / "client_xport.c").read_text()
     server_source = (ROOT / "src" / "glbridge" / "server_gl.c").read_text()
     server_main_source = (ROOT / "src" / "glbridge" / "server.c").read_text()
     launcher_source = (ROOT / "portmaster" / "Guacamelee.sh").read_text()
@@ -82,6 +83,25 @@ def main() -> int:
     assert 'GUA-GL first glDraw' in server_main_source
     assert 'GUA-GL first eglSwapBuffers' in server_main_source
     assert 'GUA-GL op#' in server_main_source
+    assert 'GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-0}"' in launcher_source
+    assert 'GUACAMELEE_XPORT_DIAG="${GUACAMELEE_XPORT_DIAG:-0}"' in launcher_source
+    for marker in [
+        'GUA-XPORT enter',
+        'GUA-XPORT lock-acquired',
+        'GUA-XPORT sent',
+        'GUA-XPORT reply-hdr',
+        'GUA-XPORT end',
+        'GUA-XPORT glGetIntegerv begin',
+        'GUA-XPORT glGetIntegerv end',
+    ]:
+        assert marker in xport_source
+    assert 'diag_calls < 32' in xport_source
+    assert 'BOX86_DYNAREC="${GUACAMELEE_BOX86_DYNAREC:-1}"' in launcher_source
+    assert 'BOX86_DYNAREC_BIGBLOCK="${GUACAMELEE_BOX86_DYNAREC_BIGBLOCK:-1}"' in launcher_source
+    assert 'BOX86_LOG="${GUACAMELEE_BOX86_LOG:-0}"' in launcher_source
+    assert 'BOX86_DLSYM_ERROR="${GUACAMELEE_BOX86_DLSYM_ERROR:-0}"' in launcher_source
+    assert 'BOX86_DYNAREC_LOG="${GUACAMELEE_BOX86_DYNAREC_LOG:-0}"' in launcher_source
+    assert 'box86_dynarec=$BOX86_DYNAREC' in launcher_source
 
     bridge_hashes = {
         hashlib.sha256((PORT / "glbridge" / name).read_bytes()).hexdigest()

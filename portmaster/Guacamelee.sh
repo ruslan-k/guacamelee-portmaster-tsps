@@ -93,7 +93,8 @@ if [ "$BRIDGE" -eq 1 ]; then
   export TSPGL_WIDTH="${GUACAMELEE_WIDTH:-640}"
   export TSPGL_HEIGHT="${GUACAMELEE_HEIGHT:-480}"
   export TSPGL_PRESENT="${GUACAMELEE_PRESENT:-letterbox}"
-  export GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-1}"
+  export GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-0}"
+  export GUACAMELEE_XPORT_DIAG="${GUACAMELEE_XPORT_DIAG:-0}"
   rm -f /tmp/nfsmw.present.ready /tmp/tsp-glbridge.sock /tmp/tspgl-xport /tmp/nfsmw.frame
 
   (
@@ -129,6 +130,11 @@ if [ "$BRIDGE" -eq 1 ]; then
   export BOX86_LD_LIBRARY_PATH="$GAMEDIR/box86/native:$GAMEDIR/box86/x86:$GAMEDIR/gamedata/lib32:$GAMEDIR/libs/x86"
   export BOX86_PREFER_WRAPPED=1
   export BOX86_X11THREADS=1
+  export BOX86_DYNAREC="${GUACAMELEE_BOX86_DYNAREC:-1}"
+  export BOX86_DYNAREC_BIGBLOCK="${GUACAMELEE_BOX86_DYNAREC_BIGBLOCK:-1}"
+  export BOX86_LOG="${GUACAMELEE_BOX86_LOG:-0}"
+  export BOX86_DLSYM_ERROR="${GUACAMELEE_BOX86_DLSYM_ERROR:-0}"
+  export BOX86_DYNAREC_LOG="${GUACAMELEE_BOX86_DYNAREC_LOG:-0}"
   export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es/libGL.so.1"
   export SDL_VIDEO_EGL_DRIVER="$GLBRIDGE/libEGL.so.1"
   export LIBGL_GLES="$GLBRIDGE/libGLESv2.so.2"
@@ -151,7 +157,8 @@ if [ "$BRIDGE" -eq 1 ]; then
   echo "bridge_presenter=$PRESENTER"
   echo "bridge_loader=$LD"
   echo "bridge_dimensions=${TSPGL_WIDTH}x${TSPGL_HEIGHT}"
-  echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fb=$LIBGL_FB diag=$GUACAMELEE_GL_DIAG"
+  echo "box86_dynarec=$BOX86_DYNAREC bigblock=$BOX86_DYNAREC_BIGBLOCK log=$BOX86_LOG dlsym_error=$BOX86_DLSYM_ERROR dynarec_log=$BOX86_DYNAREC_LOG"
+  echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fb=$LIBGL_FB diag=$GUACAMELEE_GL_DIAG xport_diag=$GUACAMELEE_XPORT_DIAG"
   $GPTOKEYB2 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
   pm_platform_helper "$GAMEDIR/box86/box86"
   "$LD" --library-path "$LD_LIBRARY_PATH" "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin"
