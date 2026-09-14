@@ -49,6 +49,7 @@ def main() -> int:
 
     source = (ROOT / "src" / "glbridge" / "client.c").read_text()
     server_source = (ROOT / "src" / "glbridge" / "server_gl.c").read_text()
+    server_main_source = (ROOT / "src" / "glbridge" / "server.c").read_text()
     launcher_source = (ROOT / "portmaster" / "Guacamelee.sh").read_text()
     assert 'TSPGL_WIDTH' in source and 'TSPGL_HEIGHT' in source
     assert 'eglQuerySurface' in source
@@ -65,6 +66,22 @@ def main() -> int:
     assert 'LIBGL_ES="${GUACAMELEE_LIBGL_ES:-2}"' in launcher_source
     assert 'LIBGL_GL="${GUACAMELEE_LIBGL_GL:-21}"' in launcher_source
     assert 'gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST' in launcher_source
+
+    # The requested install root must win over a legacy duplicate left under
+    # Data/ports; otherwise a correct Roms/PORTS deployment is never tested.
+    roms_candidate = '"${directory:+${directory%/}/guacamelee}"'
+    legacy_candidate = '/mnt/SDCARD/Data/ports/guacamelee'
+    assert roms_candidate in launcher_source
+    assert launcher_source.index(roms_candidate) < launcher_source.index(legacy_candidate)
+    assert 'GUACAMELEE_GL_DIAG' in launcher_source
+    assert 'GUA-GL shader-final:' in server_source
+    assert 'GUA-GL shader-compile FAIL' in server_main_source
+    assert 'GUA-GL program-link FAIL' in server_main_source
+    assert 'GUA-GL first glLinkProgram success' in server_main_source
+    assert 'GUA-GL first glUseProgram' in server_main_source
+    assert 'GUA-GL first glDraw' in server_main_source
+    assert 'GUA-GL first eglSwapBuffers' in server_main_source
+    assert 'GUA-GL op#' in server_main_source
 
     bridge_hashes = {
         hashlib.sha256((PORT / "glbridge" / name).read_bytes()).hexdigest()

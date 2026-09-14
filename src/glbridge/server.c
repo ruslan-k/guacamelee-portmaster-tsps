@@ -22,6 +22,50 @@
 
 struct tspgl_api G;
 
+static int gl_diag = -1;
+static unsigned gl_diag_ops;
+static int gl_diag_link;
+static int gl_diag_use;
+static int gl_diag_draw;
+static int gl_diag_swap;
+
+static int gl_diag_enabled(void)
+{
+    const char *v;
+
+    if (gl_diag >= 0)
+        return gl_diag;
+    v = getenv("GUACAMELEE_GL_DIAG");
+    gl_diag = v && strcmp(v, "0") != 0;
+    return gl_diag;
+}
+
+static const char *gl_diag_op_name(uint32_t op)
+{
+    switch (op) {
+    case OP_glGetIntegerv: return "glGetIntegerv";
+    case OP_glGetString: return "glGetString";
+    case OP_glCreateShader: return "glCreateShader";
+    case OP_glShaderSource: return "glShaderSource";
+    case OP_glCompileShader: return "glCompileShader";
+    case OP_glLinkProgram: return "glLinkProgram";
+    case OP_glUseProgram: return "glUseProgram";
+    case OP_glDrawArrays: return "glDrawArrays";
+    case OP_glDrawElements: return "glDrawElements";
+    case OP_glGetShaderiv: return "glGetShaderiv";
+    case OP_glGetProgramiv: return "glGetProgramiv";
+    default: return "other";
+    }
+}
+
+static void gl_diag_op(uint32_t op, uint32_t len)
+{
+    if (!gl_diag_enabled() || gl_diag_ops >= 128)
+        return;
+    fprintf(stderr, "GUA-GL op#%u %s(%u) len=%u\n", gl_diag_ops++,
+            gl_diag_op_name(op), op, len);
+}
+
 #define SDL_INIT_VIDEO 0x00000020u
 #define SDL_INIT_JOYSTICK 0x00000200u
 #define SDL_INIT_GAMECONTROLLER 0x00002000u
@@ -1116,10 +1160,15 @@ static int handle_client(int fd)
     if (h.len && full_read(fd, in, h.len) != 0)
         goto out_free;
 
+    gl_diag_op(h.op, h.len);
     if (h.op == OP_PING) {
         rc = 0;
     } else if (h.op == OP_EGL_SWAP) {
         splash_live = 0;
+        if (gl_diag_enabled() && !gl_diag_swap) {
+            fprintf(stderr, "GUA-GL first eglSwapBuffers\n");
+            gl_diag_swap = 1;
+        }
         present_swap();
         rc = 0;
     } else {
@@ -1147,8 +1196,8 @@ static int handle_client(int fd)
                 memset(slog, 0, sizeof(slog));
                 if (getlog)
                     getlog(shader, (int32_t)sizeof(slog) - 1, &slen, slog);
-                fprintf(stderr, "tspgl-srv: COMPILE FAIL id=%u: %s\n", shader,
-                        slog);
+                fprintf(stderr, "GUA-GL shader-compile FAIL id=%u\n", shader);
+                fprintf(stderr, "GUA-GL shader-log: %s\n", slog);
             }
         } else if (h.op == OP_glLinkProgram && h.len >= 4 && G.glGetProgramiv) {
             uint32_t prog;
@@ -1164,7 +1213,25 @@ static int handle_client(int fd)
                 memset(plog, 0, sizeof(plog));
                 if (getlog)
                     getlog(prog, (int32_t)sizeof(plog) - 1, &plen, plog);
-                fprintf(stderr, "tspgl-srv: LINK FAIL id=%u: %s\n", prog, plog);
+                fprintf(stderr, "GUA-GL program-link FAIL id=%u\n", prog);
+                fprintf(stderr, "GUA-GL program-log: %s\n", plog);
+            } else if (gl_diag_enabled() && !gl_diag_link) {
+                fprintf(stderr, "GUA-GL first glLinkProgram success id=%u\n", prog);
+                gl_diag_link = 1;
+            }
+        }
+        if (rc == 0 && gl_diag_enabled() && h.len >= 4) {
+            uint32_t object;
+
+            memcpy(&object, in, 4);
+            if (h.op == OP_glUseProgram && object != 0 && !gl_diag_use) {
+                fprintf(stderr, "GUA-GL first glUseProgram id=%u\n", object);
+                gl_diag_use = 1;
+            } else if ((h.op == OP_glDrawArrays || h.op == OP_glDrawElements) &&
+                       !gl_diag_draw) {
+                fprintf(stderr, "GUA-GL first glDraw %s\n",
+                        gl_diag_op_name(h.op));
+                gl_diag_draw = 1;
             }
         }
     }

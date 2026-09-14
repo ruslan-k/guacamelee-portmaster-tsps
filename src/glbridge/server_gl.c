@@ -329,6 +329,7 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
                                   uint8_t *out, uint32_t *out_n)
 {
     const uint32_t *u = (const uint32_t *)in;
+    static int final_dump;
     *out_n = 0;
 
     switch (op) {
@@ -499,6 +500,11 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
                 src = rw;
                 total = (size_t)nlen;
             }
+        }
+        if (gl_diag_enabled() && final_dump < 8) {
+            fprintf(stderr, "GUA-GL shader-final: id=%u bytes=%u\n%s\n",
+                    shader, (unsigned)total, src);
+            final_dump++;
         }
         one = src;
         one_len = (int32_t)total;

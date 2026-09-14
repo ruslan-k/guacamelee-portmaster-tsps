@@ -19,9 +19,9 @@ get_controls
 
 GAMEDIR=
 for candidate in \
-  /mnt/SDCARD/Data/ports/guacamelee \
   "${directory:+${directory%/}/guacamelee}" \
   "${directory:+/${directory#/}/ports/guacamelee}" \
+  /mnt/SDCARD/Data/ports/guacamelee \
   /roms/ports/guacamelee /sdcard/ports/guacamelee; do
   if [ -d "$candidate" ]; then
     GAMEDIR="$candidate"
@@ -93,6 +93,7 @@ if [ "$BRIDGE" -eq 1 ]; then
   export TSPGL_WIDTH="${GUACAMELEE_WIDTH:-640}"
   export TSPGL_HEIGHT="${GUACAMELEE_HEIGHT:-480}"
   export TSPGL_PRESENT="${GUACAMELEE_PRESENT:-letterbox}"
+  export GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-1}"
   rm -f /tmp/nfsmw.present.ready /tmp/tsp-glbridge.sock /tmp/tspgl-xport /tmp/nfsmw.frame
 
   (
@@ -150,7 +151,7 @@ if [ "$BRIDGE" -eq 1 ]; then
   echo "bridge_presenter=$PRESENTER"
   echo "bridge_loader=$LD"
   echo "bridge_dimensions=${TSPGL_WIDTH}x${TSPGL_HEIGHT}"
-  echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fb=$LIBGL_FB"
+  echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fb=$LIBGL_FB diag=$GUACAMELEE_GL_DIAG"
   $GPTOKEYB2 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
   pm_platform_helper "$GAMEDIR/box86/box86"
   "$LD" --library-path "$LD_LIBRARY_PATH" "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin"
