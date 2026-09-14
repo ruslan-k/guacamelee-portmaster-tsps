@@ -102,6 +102,11 @@ def main() -> int:
     assert 'GUACAMELEE_OP_RING="${GUACAMELEE_OP_RING:-0}"' in launcher_source
     assert 'GUACAMELEE_PIXEL_PROBE="${GUACAMELEE_PIXEL_PROBE:-0}"' in launcher_source
     assert 'GUACAMELEE_PIXEL_DUMP="${GUACAMELEE_PIXEL_DUMP:-0}"' in launcher_source
+    assert 'GUACAMELEE_FBO_TRANSITION_DIAG="${GUACAMELEE_FBO_TRANSITION_DIAG:-0}"' in launcher_source
+    assert 'GUACAMELEE_FBO_FORMAT_MATRIX="${GUACAMELEE_FBO_FORMAT_MATRIX:-0}"' in launcher_source
+    assert 'GUACAMELEE_GL_ERROR_TRACE="${GUACAMELEE_GL_ERROR_TRACE:-0}"' in launcher_source
+    assert 'GUACAMELEE_GL4ES_PACKED_DS_CAP="${GUACAMELEE_GL4ES_PACKED_DS_CAP:-0}"' in launcher_source
+    assert 'GUACAMELEE_LIBGL_AUTOMIPMAP="${GUACAMELEE_LIBGL_AUTOMIPMAP:-0}"' in launcher_source
     assert 'GUACAMELEE_FBO_LIFECYCLE="${GUACAMELEE_FBO_LIFECYCLE:-0}"' in launcher_source
     assert 'LIBGL_FBOFORCETEX="${GUACAMELEE_LIBGL_FBOFORCETEX:-1}"' in launcher_source
     assert 'GUACAMELEE_REAL_GLERROR="${GUACAMELEE_REAL_GLERROR:-0}"' in launcher_source

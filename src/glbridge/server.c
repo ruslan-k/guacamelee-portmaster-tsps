@@ -55,6 +55,15 @@ static int gl_diag_lifecycle_enabled(void)
 static const char *gl_diag_op_name(uint32_t op)
 {
     switch (op) {
+    case OP_glBindFramebuffer: return "glBindFramebuffer";
+    case OP_glBindRenderbuffer: return "glBindRenderbuffer";
+    case OP_glCheckFramebufferStatus: return "glCheckFramebufferStatus";
+    case OP_glFramebufferRenderbuffer: return "glFramebufferRenderbuffer";
+    case OP_glFramebufferTexture2D: return "glFramebufferTexture2D";
+    case OP_glRenderbufferStorage: return "glRenderbufferStorage";
+    case OP_glTexImage2D: return "glTexImage2D";
+    case OP_glDeleteRenderbuffers: return "glDeleteRenderbuffers";
+    case OP_glDeleteTextures: return "glDeleteTextures";
     case OP_glGetIntegerv: return "glGetIntegerv";
     case OP_glGetString: return "glGetString";
     case OP_glCreateShader: return "glCreateShader";
@@ -105,6 +114,9 @@ static int gl_diag_is_fbo_op(uint32_t op)
     case OP_glGenRenderbuffers:
     case OP_glGetFramebufferAttachmentParameteriv:
     case OP_glGetRenderbufferParameteriv:
+    case OP_glTexImage2D:
+    case OP_glDeleteRenderbuffers:
+    case OP_glDeleteTextures:
         return 1;
     default:
         return 0;
@@ -200,6 +212,7 @@ static void gl_diag_fbo_result(uint32_t op, const uint8_t *out,
 #define GL_UNSIGNED_INT_24_8 0x84FA
 #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
 #define GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE 0x8CD0
+#define GL_TEXTURE 0x1702
 #define GL_NONE 0
 #define GL_SCISSOR_TEST 0x0C11
 #define GL_COLOR_WRITEMASK 0x0C23
@@ -341,6 +354,11 @@ static unsigned op_ring_dumps;
 static int pixel_probe_enabled;
 static unsigned pixel_swap_count;
 static int pixel_dump_enabled;
+static int fbo_transition_diag = -1;
+static uint32_t fbo_transition_prev[64];
+static int gl_error_trace = -1;
+static uint32_t deferred_gl_error;
+static unsigned gl_error_trace_count;
 static int swap_finish;
 static int swap_interval;
 static uint32_t now_ms(void)
@@ -423,6 +441,99 @@ static void tspgl_stage_flip(void)
 
 #include "server_gen.c"
 #include "server_gl.c"
+
+static void fbo_format_matrix(void)
+{
+    const char *v = getenv("GUACAMELEE_FBO_FORMAT_MATRIX");
+    void (*gen_fb)(int32_t, uint32_t *) = (void *)G.glGenFramebuffers;
+    void (*del_fb)(int32_t, const uint32_t *) = (void *)G.glDeleteFramebuffers;
+    void (*bind_fb)(uint32_t, uint32_t) = (void *)G.glBindFramebuffer;
+    void (*gen_rb)(int32_t, uint32_t *) = (void *)G.glGenRenderbuffers;
+    void (*del_rb)(int32_t, const uint32_t *) = (void *)G.glDeleteRenderbuffers;
+    void (*bind_rb)(uint32_t, uint32_t) = (void *)G.glBindRenderbuffer;
+    void (*rb_storage)(uint32_t, uint32_t, int32_t, int32_t) =
+        (void *)G.glRenderbufferStorage;
+    void (*fb_rb)(uint32_t, uint32_t, uint32_t, uint32_t) =
+        (void *)G.glFramebufferRenderbuffer;
+    void (*gen_tex)(int32_t, uint32_t *) = (void *)G.glGenTextures;
+    void (*del_tex)(int32_t, const uint32_t *) = (void *)G.glDeleteTextures;
+    void (*bind_tex)(uint32_t, uint32_t) = (void *)G.glBindTexture;
+    void (*tex_image)(uint32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
+                      uint32_t, uint32_t, const void *) = (void *)G.glTexImage2D;
+    void (*fb_tex)(uint32_t, uint32_t, uint32_t, uint32_t, int32_t) =
+        (void *)G.glFramebufferTexture2D;
+    uint32_t (*check_fb)(uint32_t) = (void *)G.glCheckFramebufferStatus;
+    uint32_t (*get_error)(void) = (void *)G.glGetError;
+    uint32_t fbo, color_tex, color_rb, depth_rb, stencil_rb;
+    int32_t e_storage, e_attach;
+
+    if (!v || atoi(v) == 0 || !gen_fb || !del_fb || !bind_fb || !gen_rb ||
+        !del_rb || !bind_rb || !rb_storage || !fb_rb || !gen_tex ||
+        !del_tex || !bind_tex || !tex_image || !fb_tex || !check_fb ||
+        !get_error)
+        return;
+
+#define MATRIX_ROW(name, color_kind, packed, combined, with_stencil) do {                 \
+        color_tex = color_rb = depth_rb = stencil_rb = 0;                    \
+        gen_fb(1, &fbo); bind_fb(GL_FRAMEBUFFER, fbo);                      \
+        if (color_kind == 0) {                                               \
+            gen_tex(1, &color_tex); bind_tex(GL_TEXTURE_2D, color_tex);     \
+            tex_image(GL_TEXTURE_2D, 0, GL_RGBA, 1024, 768, 0, GL_RGBA,     \
+                      GL_UNSIGNED_BYTE, NULL);                               \
+            e_storage = (int32_t)get_error();                                \
+            fb_tex(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,      \
+                   color_tex, 0);                                             \
+        } else {                                                              \
+            gen_rb(1, &color_rb); bind_rb(GL_RENDERBUFFER, color_rb);       \
+            rb_storage(GL_RENDERBUFFER, 0x8056, 1024, 768);                  \
+            e_storage = (int32_t)get_error();                                \
+            fb_rb(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,     \
+                  color_rb);                                                  \
+        }                                                                         \
+        e_attach = (int32_t)get_error();                                    \
+        gen_rb(1, &depth_rb); bind_rb(GL_RENDERBUFFER, depth_rb);            \
+        rb_storage(GL_RENDERBUFFER, (packed) ? GL_DEPTH24_STENCIL8 :         \
+                   GL_DEPTH_COMPONENT16, 1024, 768);                         \
+        e_storage = (e_storage << 16) | (int32_t)(get_error() & 0xffff);     \
+        fb_rb(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,          \
+              depth_rb);                                                       \
+        if (combined) fb_rb(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,     \
+                            GL_RENDERBUFFER, depth_rb);                       \
+        e_attach = (e_attach << 16) | (int32_t)(get_error() & 0xffff);       \
+        if (!packed && with_stencil) {                                                         \
+            gen_rb(1, &stencil_rb); bind_rb(GL_RENDERBUFFER, stencil_rb);    \
+            rb_storage(GL_RENDERBUFFER, 0x8D48, 1024, 768);                  \
+            e_storage = (e_storage << 16) | (int32_t)(get_error() & 0xffff); \
+            fb_rb(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER,    \
+                  stencil_rb);                                                \
+            e_attach = (e_attach << 16) | (int32_t)(get_error() & 0xffff);   \
+        } else if (!combined) {                                                \
+            fb_rb(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER,    \
+                  depth_rb);                                                   \
+            e_attach = (e_attach << 16) | (int32_t)(get_error() & 0xffff);   \
+        }                                                                       \
+        fprintf(stderr, "GUA-FBO-MATRIX %s storage=0x%x attach=0x%x "        \
+                "status=0x%x depth_rb=%u stencil_rb=%u\\n", name,          \
+                (unsigned)e_storage, (unsigned)e_attach,                   \
+                check_fb(GL_FRAMEBUFFER), depth_rb,                          \
+                packed ? depth_rb : (stencil_rb));                           \
+        if (color_kind == 0) del_tex(1, &color_tex);                         \
+        if (color_kind != 0) del_rb(1, &color_rb);                            \
+        if (!packed && with_stencil) del_rb(1, &stencil_rb);                                  \
+        del_rb(1, &depth_rb); del_fb(1, &fbo);                                \
+    } while (0)
+
+    MATRIX_ROW("M1 color=RGBA depth=D16", 0, 0, 0, 0);
+    MATRIX_ROW("M2 color=RGBA depth=D16 stencil=S8", 0, 0, 0, 1);
+    MATRIX_ROW("M3 color=RGBA packed=D24S8 separate", 0, 1, 0, 0);
+    MATRIX_ROW("M3b color=RGBA packed=D24S8 combined", 0, 1, 1, 0);
+    MATRIX_ROW("M4 color=RGBA4 depth=D16 stencil=S8", 1, 0, 0, 1);
+    MATRIX_ROW("M5 color=RGBA4 packed=D24S8 separate", 1, 1, 0, 0);
+    MATRIX_ROW("M5b color=RGBA4 packed=D24S8 combined", 1, 1, 1, 0);
+#undef MATRIX_ROW
+    bind_fb(GL_FRAMEBUFFER, 0);
+    fprintf(stderr, "GUA-FBO-MATRIX done\\n");
+}
 
 static int load_sdl(void)
 {
@@ -848,8 +959,9 @@ static void gl_diag_fbo_lifecycle(uint32_t op, const uint8_t *in,
                     &type);
             get_att(GL_FRAMEBUFFER, u[1], GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
                     &name);
-            get_att(GL_FRAMEBUFFER, u[1], GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL,
-                    &level);
+            if (type == (int32_t)GL_TEXTURE)
+                get_att(GL_FRAMEBUFFER, u[1], GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL,
+                        &level);
         }
         fprintf(stderr,
                 "GUA-FBO attachment fb=%d slot=0x%x type=0x%x name=%d level=%d\\n",
@@ -866,6 +978,120 @@ static void gl_diag_fbo_lifecycle(uint32_t op, const uint8_t *in,
                 op == OP_glDrawArrays ? "DrawArrays" : "DrawElements");
     }
     gl_diag_lifecycle_ops++;
+}
+
+static int gl_error_trace_enabled(void)
+{
+    const char *v;
+    if (gl_error_trace >= 0)
+        return gl_error_trace;
+    v = getenv("GUACAMELEE_GL_ERROR_TRACE");
+    gl_error_trace = v && strcmp(v, "0") != 0;
+    return gl_error_trace;
+}
+
+static void gl_error_trace_after(uint32_t op, uint32_t seq)
+{
+    uint32_t (*get_error)(void);
+    uint32_t err;
+    int32_t fb = 0, prog = 0;
+    if (!gl_error_trace_enabled() || op == OP_glGetError ||
+        !G.glGetError || gl_error_trace_count >= 256)
+        return;
+    get_error = (void *)G.glGetError;
+    err = get_error();
+    if (!err)
+        return;
+    if (real_get_integerv) {
+        real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+        real_get_integerv(GL_CURRENT_PROGRAM, &prog);
+    }
+    fprintf(stderr, "GUA-GL-ERR seq=%u op=%s/%u fb=%d prog=%d error=0x%x\\n",
+            seq, gl_diag_op_name(op), op, (int)fb, (int)prog, err);
+    ++gl_error_trace_count;
+    deferred_gl_error = err;
+}
+
+static void gl_diag_fbo_transition(uint32_t op, const uint8_t *in,
+                                    uint32_t len)
+{
+    static const uint32_t slots[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT,
+                                     GL_STENCIL_ATTACHMENT};
+    uint32_t a[8] = {0};
+    int32_t fb = 0, old_rb = 0;
+    uint32_t status, old;
+    unsigned i, n;
+    const char *v;
+    void (*get_att)(uint32_t, uint32_t, uint32_t, int32_t *) =
+        (void *)G.glGetFramebufferAttachmentParameteriv;
+    void (*get_rb)(uint32_t, uint32_t, int32_t *) =
+        (void *)G.glGetRenderbufferParameteriv;
+    void (*bind_rb)(uint32_t, uint32_t) = (void *)G.glBindRenderbuffer;
+
+    if (fbo_transition_diag < 0) {
+        v = getenv("GUACAMELEE_FBO_TRANSITION_DIAG");
+        fbo_transition_diag = v && strcmp(v, "0") != 0;
+    }
+    if (!fbo_transition_diag || !real_check_fb || !real_get_integerv ||
+        !get_att || !G.glGetRenderbufferParameteriv || !bind_rb ||
+        !gl_diag_is_fbo_op(op) ||
+        (op != OP_glFramebufferRenderbuffer &&
+         op != OP_glFramebufferTexture2D && op != OP_glRenderbufferStorage &&
+         op != OP_glTexImage2D && op != OP_glCopyTexImage2D &&
+         op != OP_glDeleteRenderbuffers && op != OP_glDeleteTextures))
+        return;
+    n = len / 4u;
+    if (n > 8u)
+        n = 8u;
+    for (i = 0; i < n; ++i)
+        memcpy(&a[i], in + i * 4u, 4u);
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (fb <= 0 || fb >= (int32_t)(sizeof(fbo_transition_prev) /
+                                    sizeof(fbo_transition_prev[0])))
+        return;
+    status = real_check_fb(GL_FRAMEBUFFER);
+    old = fbo_transition_prev[fb];
+    fbo_transition_prev[fb] = status;
+    if (old == status)
+        return;
+    real_get_integerv(GL_RENDERBUFFER_BINDING, &old_rb);
+    fprintf(stderr,
+            "GUA-FBO-TRANS seq=%u trigger=%s/%u args=%x,%x,%x,%x "
+            "fb=%d status=0x%x->0x%x ",
+            gl_diag_lifecycle_ops, gl_diag_op_name(op), op, a[0], a[1], a[2],
+            a[3], (int)fb, old, status);
+    for (i = 0; i < 3; ++i) {
+        int32_t type = 0, name = 0, w = 0, h = 0, fmt = 0;
+        get_att(GL_FRAMEBUFFER, slots[i], GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                &type);
+        get_att(GL_FRAMEBUFFER, slots[i], GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+                &name);
+        if (type == (int32_t)GL_RENDERBUFFER && name > 0) {
+            bind_rb(GL_RENDERBUFFER, (uint32_t)name);
+            get_rb(GL_RENDERBUFFER, 0x8D42, &w);
+            get_rb(GL_RENDERBUFFER, 0x8D43, &h);
+            get_rb(GL_RENDERBUFFER, 0x8D44, &fmt);
+        }
+        fprintf(stderr, "%s:type=0x%x id=%d size=%dx%d ifmt=0x%x ",
+                i == 0 ? "color" : (i == 1 ? "depth" : "stencil"),
+                (unsigned)type, (int)name, (int)w, (int)h, (unsigned)fmt);
+    }
+    if (old_rb > 0)
+        bind_rb(GL_RENDERBUFFER, (uint32_t)old_rb);
+    fprintf(stderr, "ds=%s\\n",
+            ({
+                int32_t dt = 0, st = 0, dn = 0, sn = 0;
+                get_att(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &dt);
+                get_att(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &st);
+                get_att(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &dn);
+                get_att(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &sn);
+                (dt == (int32_t)GL_RENDERBUFFER &&
+                 st == (int32_t)GL_RENDERBUFFER && dn == sn) ? "same" : "different";
+            }));
 }
 
 static void wrap_bind_fb(uint32_t target, uint32_t fb)
@@ -1417,7 +1643,8 @@ static void pixel_probe_target(const char *stage, uint32_t fb, int w, int h,
 
 static int pixel_probe_swap(unsigned swap)
 {
-    return swap == 1 || swap == 2 || swap == 3 || swap == 10 || swap == 30;
+    return swap == 1 || swap == 2 || swap == 3 || swap == 10 || swap == 30 ||
+           swap == 300;
 }
 
 static void present_swap(void)
@@ -1673,7 +1900,13 @@ static int handle_client(int fd)
             op_ring_dump(err);
         }
         gl_diag_fbo_result(h.op, out, out_n, rc);
+        gl_error_trace_after(h.op, h.seq);
+        if (h.op == OP_glGetError && out_n >= 4 && deferred_gl_error) {
+            memcpy(out, &deferred_gl_error, 4);
+            deferred_gl_error = 0;
+        }
         gl_diag_fbo_lifecycle(h.op, in, h.len);
+        gl_diag_fbo_transition(h.op, in, h.len);
         if (h.op == OP_glFinish)
             tspgl_stage_flip();
         if (rc != 0) {
@@ -1946,6 +2179,7 @@ int main(void)
         G.glBindVertexArray = gl_get("glBindVertexArrayOES");
     if (!G.glIsVertexArray)
         G.glIsVertexArray = gl_get("glIsVertexArrayOES");
+    fbo_format_matrix();
     khr_debug_setup();
     {
         const uint8_t *(*gs)(uint32_t) = (void *)G.glGetString;
