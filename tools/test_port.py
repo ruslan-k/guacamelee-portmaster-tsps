@@ -57,6 +57,15 @@ def main() -> int:
     assert '$GPTOKEYB2 "game-bin"' in launcher_source
     assert '"$GPTOKEYB2"' not in launcher_source
 
+    # The bundled gl4es hardware probe intentionally submits desktop GLSL 120
+    # shaders with IMG-specific layout qualifiers. Through the 32->64 proxy we
+    # want the conservative GLES2 capability baseline instead of probing the
+    # AArch64 presenter as if it were a direct guest driver.
+    assert 'LIBGL_NOTEST="${GUACAMELEE_LIBGL_NOTEST:-1}"' in launcher_source
+    assert 'LIBGL_ES="${GUACAMELEE_LIBGL_ES:-2}"' in launcher_source
+    assert 'LIBGL_GL="${GUACAMELEE_LIBGL_GL:-21}"' in launcher_source
+    assert 'gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST' in launcher_source
+
     bridge_hashes = {
         hashlib.sha256((PORT / "glbridge" / name).read_bytes()).hexdigest()
         for name in [
