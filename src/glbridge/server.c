@@ -66,6 +66,59 @@ static void gl_diag_op(uint32_t op, uint32_t len)
             gl_diag_op_name(op), op, len);
 }
 
+static unsigned gl_diag_fbo_ops;
+
+static int gl_diag_is_fbo_op(uint32_t op)
+{
+    switch (op) {
+    case OP_glBindFramebuffer:
+    case OP_glBindRenderbuffer:
+    case OP_glCheckFramebufferStatus:
+    case OP_glFramebufferRenderbuffer:
+    case OP_glFramebufferTexture2D:
+    case OP_glRenderbufferStorage:
+    case OP_glGenFramebuffers:
+    case OP_glGenRenderbuffers:
+    case OP_glGetFramebufferAttachmentParameteriv:
+    case OP_glGetRenderbufferParameteriv:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static void gl_diag_fbo_call(uint32_t op, const uint8_t *in, uint32_t len)
+{
+    uint32_t a[5] = {0, 0, 0, 0, 0};
+    unsigned n, i;
+
+    if (!gl_diag_enabled() || !gl_diag_is_fbo_op(op) ||
+        gl_diag_fbo_ops >= 256)
+        return;
+    n = len / 4u;
+    if (n > 5)
+        n = 5;
+    for (i = 0; i < n; ++i)
+        memcpy(&a[i], in + i * 4u, 4);
+    fprintf(stderr,
+            "GUA-FBO call#%u op=%u len=%u a0=0x%x a1=0x%x a2=%d a3=%d a4=%d\n",
+            gl_diag_fbo_ops++, op, len, a[0], a[1], (int32_t)a[2],
+            (int32_t)a[3], (int32_t)a[4]);
+}
+
+static void gl_diag_fbo_result(uint32_t op, const uint8_t *out,
+                               uint32_t out_n, int rc)
+{
+    uint32_t v = 0;
+
+    if (!gl_diag_enabled() || !gl_diag_is_fbo_op(op))
+        return;
+    if (out && out_n >= 4)
+        memcpy(&v, out, 4);
+    fprintf(stderr, "GUA-FBO result op=%u rc=%d out_n=%u value=0x%x\n",
+            op, rc, out_n, v);
+}
+
 #define SDL_INIT_VIDEO 0x00000020u
 #define SDL_INIT_JOYSTICK 0x00000200u
 #define SDL_INIT_GAMECONTROLLER 0x00002000u
@@ -183,8 +236,8 @@ static uint8_t *frame_map;
 static int frame_fd = -1;
 static int listen_fd = -1;
 
-int game_w = 640;
-int game_h = 480;
+int game_w = 1024;
+int game_h = 768;
 int win_w = 1280;
 int win_h = 720;
 static int present_letterbox;
@@ -1172,10 +1225,12 @@ static int handle_client(int fd)
         present_swap();
         rc = 0;
     } else {
+        gl_diag_fbo_call(h.op, in, h.len);
         rc = tspgl_dispatch_simple(h.op, (const uint32_t *)in, h.len,
                                    (uint32_t *)out, &out_n);
         if (rc != 0)
             rc = tspgl_dispatch_special(h.op, in, h.len, out, &out_n);
+        gl_diag_fbo_result(h.op, out, out_n, rc);
         if (h.op == OP_glFinish)
             tspgl_stage_flip();
         if (rc != 0) {
@@ -1305,9 +1360,9 @@ int main(void)
     if (eh)
         game_h = atoi(eh);
     if (game_w < 1)
-        game_w = 640;
+        game_w = 1024;
     if (game_h < 1)
-        game_h = 480;
+        game_h = 768;
     {
         const char *mode = getenv("TSPGL_PRESENT");
 #ifdef TSPGL_DEFAULT_LETTERBOX

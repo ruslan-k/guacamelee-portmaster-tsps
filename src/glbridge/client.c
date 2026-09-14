@@ -2007,9 +2007,9 @@ unsigned eglQuerySurface(void *dpy, void *surf, int attr, int *value)
     if (!value)
         return 0;
     if (attr == EGL_WIDTH)
-        *value = tspgl_dimension("TSPGL_WIDTH", 640);
+        *value = tspgl_dimension("TSPGL_WIDTH", 1024);
     else if (attr == EGL_HEIGHT)
-        *value = tspgl_dimension("TSPGL_HEIGHT", 480);
+        *value = tspgl_dimension("TSPGL_HEIGHT", 768);
     else
         *value = 0;
     return 1;

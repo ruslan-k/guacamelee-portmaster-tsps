@@ -51,6 +51,7 @@ def main() -> int:
     xport_source = (ROOT / "src" / "glbridge" / "client_xport.c").read_text()
     server_source = (ROOT / "src" / "glbridge" / "server_gl.c").read_text()
     server_main_source = (ROOT / "src" / "glbridge" / "server.c").read_text()
+    frame_source = (ROOT / "src" / "nfsmw_frame.h").read_text()
     launcher_source = (ROOT / "portmaster" / "Guacamelee.sh").read_text()
     assert 'TSPGL_WIDTH' in source and 'TSPGL_HEIGHT' in source
     assert 'eglQuerySurface' in source
@@ -83,7 +84,19 @@ def main() -> int:
     assert 'GUA-GL first glDraw' in server_main_source
     assert 'GUA-GL first eglSwapBuffers' in server_main_source
     assert 'GUA-GL op#' in server_main_source
+    assert 'GUA-FBO call' in server_main_source
+    assert 'GUA-FBO result' in server_main_source
     assert 'GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-0}"' in launcher_source
+    assert 'GUACAMELEE_WIDTH:-1024' in launcher_source
+    assert 'GUACAMELEE_HEIGHT:-768' in launcher_source
+    assert '#define NFSMW_FRAME_MAX_H 768' in frame_source
+    assert 'int game_w = 1024;' in server_main_source
+    assert 'int game_h = 768;' in server_main_source
+    assert 'tspgl_dimension("TSPGL_WIDTH", 1024)' in source
+    assert 'tspgl_dimension("TSPGL_HEIGHT", 768)' in source
+    assert 'st_viewport[2] = 1024' in xport_source
+    assert 'st_viewport[3] = 768' in xport_source
+    assert launcher_source.index('export GUACAMELEE_WIDTH=') < launcher_source.index('export TSPGL_WIDTH=')
     assert 'GUACAMELEE_XPORT_DIAG="${GUACAMELEE_XPORT_DIAG:-0}"' in launcher_source
     for marker in [
         'GUA-XPORT enter',

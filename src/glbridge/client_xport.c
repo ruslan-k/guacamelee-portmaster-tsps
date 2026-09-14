@@ -62,10 +62,10 @@ struct tspgl_shared *tspgl_shared(void)
                 X->sock = -1;
                 X->pid = pid;
                 X->unpack_align = 4;
-                X->st_viewport[2] = 640;
-                X->st_viewport[3] = 480;
-                X->st_scissor[2] = 640;
-                X->st_scissor[3] = 480;
+                X->st_viewport[2] = 1024;
+                X->st_viewport[3] = 768;
+                X->st_scissor[2] = 1024;
+                X->st_scissor[3] = 768;
                 X->magic = XPORT_MAGIC;
                 fprintf(stderr, "tspgl: shared xport pid=%d\n", (int)pid);
             }
