@@ -121,6 +121,9 @@ if [ "$BRIDGE" -eq 1 ]; then
   fi
 
   export PORT_32BIT=Y
+  export XDG_RUNTIME_DIR=/tmp
+  export TMPDIR=/tmp
+  export SDL_VIDEODRIVER="${GUACAMELEE_SDL_VIDEODRIVER:-offscreen}"
   export LD_LIBRARY_PATH="$GLBRIDGE:$GAMEDIR/box86/native:$SYS/lib/arm-linux-gnueabihf:$SYS/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   export BOX86_LD_LIBRARY_PATH="$GAMEDIR/box86/native:$GAMEDIR/box86/x86:$GAMEDIR/gamedata/lib32:$GAMEDIR/libs/x86"
   export BOX86_PREFER_WRAPPED=1
