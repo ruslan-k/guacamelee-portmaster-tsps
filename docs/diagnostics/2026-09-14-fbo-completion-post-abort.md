@@ -35,7 +35,7 @@ DEPTH_COMPONENT16  0x0
 
 The opt-in `GUACAMELEE_RB_ZERO_SIZE=1` override changes those dimensions to `1024x768`.
 
-The `0x8d48` input value is not a depth-stencil enum; it is `GL_RENDERBUFFER_ALPHA_SIZE`. The opt-in `GUACAMELEE_RB_FORMAT_FIX=1` remaps it to `GL_DEPTH24_STENCIL8` (`0x88f0`). The depth/stencil attachment then becomes one compatible renderbuffer:
+The `0x8d48` input value is `GL_STENCIL_INDEX8` (`0x8d48`), not a depth-stencil enum and not `GL_RENDERBUFFER_ALPHA_SIZE` (`0x8d53`). The opt-in `GUACAMELEE_RB_FORMAT_FIX=1` therefore performs an invasive compatibility remap from a valid stencil format to `GL_DEPTH24_STENCIL8` (`0x88f0`). The depth/stencil attachment then becomes one compatible renderbuffer:
 
 ```text
 GUA-FBO format override 0x8d48 -> 0x88f0

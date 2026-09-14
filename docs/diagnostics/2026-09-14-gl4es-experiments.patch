@@ -1,0 +1,252 @@
+diff --git a/src/gl/framebuffers.c b/src/gl/framebuffers.c
+index a6c42d4b..32d1fe56 100644
+--- a/src/gl/framebuffers.c
++++ b/src/gl/framebuffers.c
+@@ -24,6 +24,21 @@ KHASH_MAP_IMPL_INT(framebufferlist_t, glframebuffer_t *);
+ int npot(int n);
+ int wrap_npot(GLenum wrap);
+ 
++static GLuint gua_packed_ds_rb;
++static GLuint gua_packed_ds_fb;
++
++static int gua_packed_ds_fix_enabled(void)
++{
++    const char *v = getenv("GUACAMELEE_GL4ES_PACKED_DS_FIX");
++    return v && *v && v[0] != '0';
++}
++
++static int gua_fbo_tex_size_fix_enabled(void)
++{
++    const char *v = getenv("GUACAMELEE_GL4ES_FBO_TEX_SIZE_FIX");
++    return v && *v && v[0] != '0';
++}
++
+ glframebuffer_t* find_framebuffer(GLuint framebuffer) {
+     // Get a framebuffer based on ID
+     if (framebuffer == 0) return glstate->fbo.fbo_0; // NULL or fbo_0 ?
+@@ -458,6 +473,44 @@ void APIENTRY_GL4ES gl4es_glFramebufferTexture2D(GLenum target, GLenum attachmen
+             LOGE("texture for FBO not found, name=%u\n", texture);
+         } else {
+             texture = tex->glname;
++
++            if (gua_fbo_tex_size_fix_enabled() &&
++                attachment >= GL_COLOR_ATTACHMENT0 &&
++                attachment < GL_COLOR_ATTACHMENT0 + hardext.maxcolorattach &&
++                (tex->width <= 0 || tex->height <= 0 ||
++                 tex->nwidth <= 0 || tex->nheight <= 0)) {
++                const char *sw = getenv("GUACAMELEE_FRONTEND_WIDTH");
++                const char *sh = getenv("GUACAMELEE_FRONTEND_HEIGHT");
++                int width = (sw && *sw) ? atoi(sw) : 1024;
++                int height = (sh && *sh) ? atoi(sh) : 768;
++                int oldactive = glstate->texture.active;
++                if (oldactive) gles_glActiveTexture(GL_TEXTURE0);
++                gltexture_t *bound = glstate->texture.bound[0][ENABLED_TEX2D];
++                GLuint oldtex = bound->glname;
++                if (oldtex != tex->glname)
++                    gles_glBindTexture(GL_TEXTURE_2D, tex->glname);
++                gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++                gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++                gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++                gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++                if (!tex->format) tex->format = GL_RGBA;
++                if (!tex->type) tex->type = GL_UNSIGNED_BYTE;
++                tex->width = tex->nwidth = width;
++                tex->height = tex->nheight = height;
++                tex->adjust = 0;
++                gles_glTexImage2D(GL_TEXTURE_2D, 0, tex->format,
++                                  width, height, 0,
++                                  GL_RGBA, GL_UNSIGNED_BYTE, NULL);
++                if (oldtex != tex->glname)
++                    gles_glBindTexture(GL_TEXTURE_2D, oldtex);
++                if (oldactive) gles_glActiveTexture(GL_TEXTURE0 + oldactive);
++                twidth = width;
++                theight = height;
++                fprintf(stderr,
++                        "GUA-GL4ES tex-size 0x0 -> %dx%d tex=%u fmt=0x%x\\n",
++                        width, height, tex->glname, tex->format);
++            }
++
+             tex->fbtex_ratio = (globals4es.fbtexscale > 0.0f) ? globals4es.fbtexscale : 0.0f;
+ 
+             // check if texture was shrunk or if fb texture is being scaled...
+@@ -859,6 +912,24 @@ void APIENTRY_GL4ES gl4es_glFramebufferRenderbuffer(GLenum target, GLenum attach
+         return;
+     }
+ 
++    if (gua_packed_ds_fix_enabled() && gua_packed_ds_rb &&
++        attachment == GL_STENCIL_ATTACHMENT) {
++        gua_packed_ds_fb = fb->id;
++        renderbuffer = gua_packed_ds_rb;
++        rend = find_renderbuffer(renderbuffer);
++        fprintf(stderr,
++                "GUA-GL4ES packed-ds stencil fb=%u rb=%u\\n",
++                fb->id, renderbuffer);
++    } else if (gua_packed_ds_fix_enabled() && gua_packed_ds_rb &&
++               attachment == GL_DEPTH_ATTACHMENT &&
++               fb->id == gua_packed_ds_fb && renderbuffer != gua_packed_ds_rb) {
++        fprintf(stderr,
++                "GUA-GL4ES packed-ds depth fb=%u rb=%u -> rb=%u\\n",
++                fb->id, renderbuffer, gua_packed_ds_rb);
++        renderbuffer = gua_packed_ds_rb;
++        rend = find_renderbuffer(renderbuffer);
++    }
++
+     if (attachment >= GL_COLOR_ATTACHMENT0 && (attachment < (GL_COLOR_ATTACHMENT0+hardext.maxcolorattach)) && globals4es.fboforcetex) {
+         if(rend->renderbuffer) {
+             // drop the renderbuffer attachement and create a texture instead...
+@@ -971,6 +1042,19 @@ void APIENTRY_GL4ES gl4es_glRenderbufferStorage(GLenum target, GLenum internalfo
+     LOAD_GLES2_OR_OES(glGenRenderbuffers);
+     LOAD_GLES2_OR_OES(glBindRenderbuffer);
+ 
++    if (width == 0 && height == 0) {
++        const char *fix = getenv("GUACAMELEE_GL4ES_RB_SIZE_FIX");
++        if (fix && *fix && fix[0] != '0') {
++            const char *sw = getenv("GUACAMELEE_FRONTEND_WIDTH");
++            const char *sh = getenv("GUACAMELEE_FRONTEND_HEIGHT");
++            width = (sw && *sw) ? atoi(sw) : 1024;
++            height = (sh && *sh) ? atoi(sh) : 768;
++            fprintf(stderr,
++                    "GUA-GL4ES rb-size 0x0 -> %dx%d fmt=0x%x\\n",
++                    width, height, internalformat);
++        }
++    }
++
+     glrenderbuffer_t *rend = glstate->fbo.current_rb;
+     if(!rend->renderbuffer) {
+         errorShim(GL_INVALID_OPERATION);
+@@ -982,12 +1066,22 @@ void APIENTRY_GL4ES gl4es_glRenderbufferStorage(GLenum target, GLenum internalfo
+     height = (hardext.npot>0 && !globals4es.potframebuffer)?height:npot(height);
+     int use_secondarybuffer = 0;
+     int use_secondarytexture = 0;
++    int packed_ds_storage = 0;
+     GLenum format = internalformat;
++    if (gua_packed_ds_fix_enabled() && internalformat == GL_STENCIL_INDEX8) {
++        packed_ds_storage = 1;
++        internalformat = GL_DEPTH24_STENCIL8;
++        format = GL_DEPTH24_STENCIL8;
++        gua_packed_ds_rb = rend->renderbuffer;
++        fprintf(stderr,
++                "GUA-GL4ES packed-ds storage rb=%u size=%dx%d\\n",
++                rend->renderbuffer, width, height);
++    }
+     // check if internal format is GL_DEPTH_STENCIL_EXT
+     if (internalformat == GL_DEPTH_STENCIL)
+         internalformat = GL_DEPTH24_STENCIL8;
+     // in that case, create first a STENCIL one then a DEPTH one....
+-    if ((internalformat == GL_DEPTH24_STENCIL8 && (hardext.depthstencil==0 || ((hardext.vendor&VEND_IMGTEC)==VEND_IMGTEC)))) {
++    if ((internalformat == GL_DEPTH24_STENCIL8 && !packed_ds_storage && (hardext.depthstencil==0 || ((hardext.vendor&VEND_IMGTEC)==VEND_IMGTEC)))) {
+         internalformat = (hardext.depth24)?GL_DEPTH_COMPONENT24:GL_DEPTH_COMPONENT16;
+         // create a stencil buffer if needed
+         if(!rend->secondarybuffer) {
+diff --git a/src/gl/getter.c b/src/gl/getter.c
+index dc500196..732a0480 100644
+--- a/src/gl/getter.c
++++ b/src/gl/getter.c
+@@ -17,20 +17,30 @@
+ #endif
+ 
+ GLenum APIENTRY_GL4ES gl4es_glGetError(void) {
+-    DBG(printf("glGetError(), noerror=%d, type_error=%d shim_error=%s\n", globals4es.noerror, glstate->type_error, PrintEnum(glstate->shim_error));)
++    DBG(printf("glGetError(), noerror=%d, type_error=%d shim_error=%s\\n", globals4es.noerror, glstate->type_error, PrintEnum(glstate->shim_error));)
+     if(globals4es.noerror)
+         return GL_NO_ERROR;
+ 	LOAD_GLES(glGetError);
+     GLenum err = GL_NO_ERROR;
++    GLenum backend_err = GL_NO_ERROR;
++    GLenum shim_err = glstate->shim_error;
+     if(!glstate->type_error) {
+         // check glGetError, forget everything else
+-        err = gles_glGetError();
++        backend_err = gles_glGetError();
++        err = backend_err;
+         // If no error, then check "shim" error
+         if(err==GL_NO_ERROR)
+             err = glstate->shim_error;
+     } else {
+         err = glstate->shim_error;
+-	}
++    }
++    if (err != GL_NO_ERROR) {
++        const char *diag = getenv("GUACAMELEE_GL4ES_ERROR_DIAG");
++        if (diag && *diag && diag[0] != '0')
++            fprintf(stderr,
++                    "GUA-GL4ES error type=%d shim=0x%x backend=0x%x return=0x%x\\n",
++                    glstate->type_error, shim_err, backend_err, err);
++    }
+     if(glstate->type_error==1)
+         gles_glGetError();  // purge error log
+     glstate->type_error = 2;
+diff --git a/src/gl/gl4es.h b/src/gl/gl4es.h
+index 0d748e3d..a590af72 100644
+--- a/src/gl/gl4es.h
++++ b/src/gl/gl4es.h
+@@ -2,6 +2,8 @@
+ #define _GL4ES_GL4ES_H_
+ 
+ #include "khash.h"
++#include <stdio.h>
++#include <stdlib.h>
+ 
+ #ifdef __ARM_NEON__
+ #include <arm_neon.h>
+@@ -105,12 +107,21 @@ static inline void errorGL() {	// next glGetError will be from GL
+     else if(glstate->type_error==2)
+         glstate->type_error = 1;    // will need to read glGetError...
+ }
+-static inline void errorShim(GLenum error) {	// next glGetError will be "error" from gl4es
++static inline void errorShim_impl(GLenum error, const char *file, int line) {	// next glGetError will be "error" from gl4es
++    int first = (glstate->shim_error == GL_NO_ERROR);
+     if(glstate->type_error && glstate->shim_error==GL_NO_ERROR)
+ 	    glstate->type_error = 1;
+-    if(glstate->shim_error == GL_NO_ERROR)
++    if(first)
+ 	    glstate->shim_error = error;
++    if(first) {
++        const char *diag = getenv("GUACAMELEE_GL4ES_ERROR_DIAG");
++        if (diag && *diag && diag[0] != '0' && error != GL_NO_ERROR)
++            fprintf(stderr,
++                    "GUA-GL4ES shim-set error=0x%x source=%s:%d type=%d\\n",
++                    error, file, line, glstate->type_error);
++    }
+ }
++#define errorShim(error) errorShim_impl((error), __FILE__, __LINE__)
+ static inline void noerrorShim() {
+     if(glstate->type_error && glstate->shim_error==GL_NO_ERROR)
+ 	    glstate->type_error = 1;
+diff --git a/src/gl/raster.c b/src/gl/raster.c
+index 197dc836..1ee61b1d 100644
+--- a/src/gl/raster.c
++++ b/src/gl/raster.c
+@@ -59,6 +59,19 @@ void APIENTRY_GL4ES gl4es_glWindowPos3f(GLfloat x, GLfloat y, GLfloat z) {
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
++    if (width == 0 && height == 0) {
++        const char *fix = getenv("GUACAMELEE_GL4ES_VIEWPORT_FIX");
++        if (fix && *fix && fix[0] != '0') {
++            const char *sw = getenv("GUACAMELEE_FRONTEND_WIDTH");
++            const char *sh = getenv("GUACAMELEE_FRONTEND_HEIGHT");
++            width = (sw && *sw) ? atoi(sw) : 1024;
++            height = (sh && *sh) ? atoi(sh) : 768;
++            fprintf(stderr,
++                    "GUA-GL4ES viewport 0x0 -> %dx%d\\n",
++                    width, height);
++        }
++    }
++
+ 	if (glstate->fbo.current_fb->id != 0) {
+     	gltexture_t *tex = gl4es_getTexture(glstate->fbo.current_fb->t_color[0], glstate->fbo.current_fb->color[0]);
+ 		if (tex->fbtex_ratio > 0.0f) {
+diff --git a/src/glx/hardext.c b/src/glx/hardext.c
+index 46e35bb8..2f015882 100644
+--- a/src/glx/hardext.c
++++ b/src/glx/hardext.c
+@@ -122,6 +122,8 @@ void GetHardwareExtensions(int notest)
+             hardext.pointsize = 1;
+             hardext.cubemap = 1;
+             hardext.maxdrawbuffers = 1;
++            if (hardext.fbo && hardext.maxcolorattach < 1)
++                hardext.maxcolorattach = 1;
+ #ifdef AMIGAOS4
+             hardext.glsl300es = 1;
+ #endif
