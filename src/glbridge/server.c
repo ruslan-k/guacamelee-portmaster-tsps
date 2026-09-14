@@ -66,6 +66,17 @@ static const char *gl_diag_op_name(uint32_t op)
     case OP_glDrawElements: return "glDrawElements";
     case OP_glGetShaderiv: return "glGetShaderiv";
     case OP_glGetProgramiv: return "glGetProgramiv";
+    case OP_glClear: return "glClear";
+    case OP_glGenerateMipmap: return "glGenerateMipmap";
+    case OP_glGetError: return "glGetError";
+    case OP_glGetFramebufferAttachmentParameteriv:
+        return "glGetFramebufferAttachmentParameteriv";
+    case OP_glGetRenderbufferParameteriv: return "glGetRenderbufferParameteriv";
+    case OP_glGetUniformLocation: return "glGetUniformLocation";
+    case OP_glUniform1f: return "glUniform1f";
+    case OP_glUniform1i: return "glUniform1i";
+    case OP_glUniformMatrix4fv: return "glUniformMatrix4fv";
+    case OP_glReadPixels: return "glReadPixels";
     default: return "other";
     }
 }
@@ -154,6 +165,16 @@ static void gl_diag_fbo_result(uint32_t op, const uint8_t *out,
 #define GL_TEXTURE_2D 0x0DE1
 #define GL_TEXTURE_CUBE_MAP 0x8513
 #define GL_RGBA 0x1908
+#define GL_DEBUG_OUTPUT 0x92E0
+#define GL_DEBUG_OUTPUT_SYNCHRONOUS 0x8242
+#define GL_DONT_CARE 0x1100
+#define GL_BACK 0x0405
+#define GL_READ_BUFFER 0x0C02
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
+#define GL_CURRENT_PROGRAM 0x8B8D
+#define GL_ACTIVE_TEXTURE 0x84E0
+#define GL_PACK_ALIGNMENT 0x0D05
 #define GL_UNSIGNED_BYTE 0x1401
 #define GL_TEXTURE_MIN_FILTER 0x2801
 #define GL_TEXTURE_MAG_FILTER 0x2800
@@ -223,6 +244,7 @@ struct sdl_api {
     int (*init)(uint32_t);
     void (*quit)(void);
     const char *(*get_error)(void);
+    const char *(*get_current_video_driver)(void);
     int (*set_hint)(const char *, const char *);
     void *(*create_window)(const char *, int, int, int, int, uint32_t);
     void (*destroy_window)(void *);
@@ -292,6 +314,35 @@ static uint32_t splash_prog;
 static int32_t splash_loc_pos;
 static int32_t splash_loc_uv;
 
+typedef void (*tspgl_debug_callback)(uint32_t, uint32_t, uint32_t,
+                                      uint32_t, int32_t, const char *,
+                                      const void *);
+static int khr_debug_enabled;
+static unsigned khr_seq;
+static uint32_t khr_op;
+static uint32_t khr_args[6];
+static uint32_t khr_arg_count;
+static uint32_t khr_fb;
+static uint32_t khr_prog;
+
+typedef struct {
+    unsigned seq;
+    uint32_t op;
+    uint32_t args[6];
+    uint32_t fb;
+    uint32_t prog;
+    uint32_t active_tex;
+    uint32_t tex2d;
+} op_ring_entry;
+static op_ring_entry op_ring[64];
+static unsigned op_ring_next;
+static unsigned op_ring_count;
+static unsigned op_ring_dumps;
+static int pixel_probe_enabled;
+static unsigned pixel_swap_count;
+static int pixel_dump_enabled;
+static int swap_finish;
+static int swap_interval;
 static uint32_t now_ms(void)
 {
     struct timespec ts;
@@ -404,6 +455,7 @@ static int load_sdl(void)
     LOAD(init, "SDL_Init");
     LOAD(quit, "SDL_Quit");
     LOAD(get_error, "SDL_GetError");
+    LOAD_OPT(get_current_video_driver, "SDL_GetCurrentVideoDriver");
     LOAD(set_hint, "SDL_SetHint");
     LOAD(create_window, "SDL_CreateWindow");
     LOAD(destroy_window, "SDL_DestroyWindow");
@@ -436,6 +488,110 @@ static void *gl_get(const char *name)
     if (!p)
         p = dlsym(RTLD_DEFAULT, name);
     return p;
+}
+
+static void khr_debug_cb(uint32_t source, uint32_t type, uint32_t id,
+                         uint32_t severity, int32_t length,
+                         const char *message, const void *user)
+{
+    int n = length;
+    (void)user;
+    if (n < 0 || n > 512)
+        n = 512;
+    fprintf(stderr,
+            "GUA-KHRDBG seq=%u op=%s/%u fb=%u prog=%u source=0x%x "
+            "type=0x%x id=%u severity=0x%x args=%u,%u,%u,%u,%u,%u msg=%.*s\\n",
+            khr_seq, gl_diag_op_name(khr_op), khr_op, khr_fb, khr_prog,
+            source, type, id, severity, khr_args[0], khr_args[1], khr_args[2],
+            khr_args[3], khr_args[4], khr_args[5], n,
+            message ? message : "");
+}
+
+static void khr_debug_setup(void)
+{
+    const char *v = getenv("GUACAMELEE_KHR_DEBUG");
+    void (*callback)(tspgl_debug_callback, const void *);
+    void (*control)(uint32_t, uint32_t, uint32_t, int32_t,
+                    const uint32_t *, uint32_t);
+    void *cbp;
+    void *ctlp;
+
+    khr_debug_enabled = v && strcmp(v, "0") != 0;
+    if (!khr_debug_enabled)
+        return;
+    cbp = gl_get("glDebugMessageCallback");
+    ctlp = gl_get("glDebugMessageControl");
+    if (!cbp || !ctlp) {
+        cbp = gl_get("glDebugMessageCallbackKHR");
+        ctlp = gl_get("glDebugMessageControlKHR");
+    }
+    if (!cbp || !ctlp) {
+        fprintf(stderr, "GUA-KHRDBG unavailable callback=%p control=%p\\n",
+                cbp, ctlp);
+        return;
+    }
+    callback = (void (*)(tspgl_debug_callback, const void *))cbp;
+    control = (void (*)(uint32_t, uint32_t, uint32_t, int32_t,
+                        const uint32_t *, uint32_t))ctlp;
+    callback(khr_debug_cb, NULL);
+    control(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, 1);
+    if (G.glEnable) {
+        G.glEnable(GL_DEBUG_OUTPUT);
+        G.glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+    }
+    fprintf(stderr, "GUA-KHRDBG enabled callback=%p control=%p\\n", cbp, ctlp);
+}
+
+static void op_ring_capture(uint32_t seq, uint32_t op, const uint8_t *in,
+                            uint32_t len)
+{
+    op_ring_entry *e;
+    unsigned i, n;
+    int32_t x;
+    const char *v = getenv("GUACAMELEE_OP_RING");
+    if (!v || strcmp(v, "0") == 0)
+        return;
+    e = &op_ring[op_ring_next];
+    memset(e, 0, sizeof(*e));
+    e->seq = seq;
+    e->op = op;
+    n = len / 4u;
+    if (n > 6)
+        n = 6;
+    for (i = 0; i < n; ++i)
+        memcpy(&e->args[i], in + i * 4u, 4);
+    if (real_get_integerv) {
+        real_get_integerv(GL_FRAMEBUFFER_BINDING, &x);
+        e->fb = x > 0 ? (uint32_t)x : 0;
+        real_get_integerv(GL_CURRENT_PROGRAM, &x);
+        e->prog = x > 0 ? (uint32_t)x : 0;
+        real_get_integerv(GL_ACTIVE_TEXTURE, &x);
+        e->active_tex = x > 0 ? (uint32_t)x : 0;
+        real_get_integerv(GL_TEXTURE_BINDING_2D, &x);
+        e->tex2d = x > 0 ? (uint32_t)x : 0;
+    }
+    op_ring_next = (op_ring_next + 1u) % 64u;
+    if (op_ring_count < 64u)
+        op_ring_count++;
+}
+
+static void op_ring_dump(uint32_t error)
+{
+    unsigned start, i;
+    if (error != 0x0502 || op_ring_dumps >= 8 || !op_ring_count)
+        return;
+    start = (op_ring_next + 64u - op_ring_count) % 64u;
+    fprintf(stderr, "GUA-RING error=0x%x count=%u dump=%u\\n", error,
+            op_ring_count, op_ring_dumps++);
+    for (i = 0; i < op_ring_count; ++i) {
+        op_ring_entry *e = &op_ring[(start + i) % 64u];
+        fprintf(stderr,
+                "GUA-RING seq=%u op=%s/%u args=%u,%u,%u,%u,%u,%u "
+                "fb=%u prog=%u active=0x%x tex2d=%u\\n",
+                e->seq, gl_diag_op_name(e->op), e->op, e->args[0], e->args[1],
+                e->args[2], e->args[3], e->args[4], e->args[5], e->fb,
+                e->prog, e->active_tex, e->tex2d);
+    }
 }
 
 static uint8_t *open_frame(void)
@@ -639,7 +795,7 @@ static void gl_diag_fbo_lifecycle(uint32_t op, const uint8_t *in,
                                   uint32_t len)
 {
     uint32_t u[5] = {0, 0, 0, 0, 0};
-    int32_t fb = 0, rb = 0, vp[4] = {0, 0, 0, 0};
+    int32_t fb = 0, rb = 0, prog = 0, vp[4] = {0, 0, 0, 0};
     unsigned i, n;
 
     if (!gl_diag_lifecycle_enabled() || gl_diag_lifecycle_ops >= 2000 ||
@@ -654,6 +810,7 @@ static void gl_diag_fbo_lifecycle(uint32_t op, const uint8_t *in,
     if (real_get_integerv) {
         real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
         real_get_integerv(GL_RENDERBUFFER_BINDING, &rb);
+        real_get_integerv(GL_CURRENT_PROGRAM, &prog);
     }
     if (op == OP_glBindFramebuffer) {
         fprintf(stderr, "GUA-FBO bind-fb requested=%u actual=%d\\n",
@@ -704,8 +861,8 @@ static void gl_diag_fbo_lifecycle(uint32_t op, const uint8_t *in,
         if (real_get_integerv)
             real_get_integerv(GL_VIEWPORT, vp);
         gl_diag_last_draw_fb = (uint32_t)fb;
-        fprintf(stderr, "GUA-DRAW fb=%d program=? viewport=%d,%d,%d,%d op=%s\\n",
-                (int)fb, vp[0], vp[1], vp[2], vp[3],
+        fprintf(stderr, "GUA-DRAW fb=%d program=%d viewport=%d,%d,%d,%d op=%s\\n",
+                (int)fb, (int)prog, vp[0], vp[1], vp[2], vp[3],
                 op == OP_glDrawArrays ? "DrawArrays" : "DrawElements");
     }
     gl_diag_lifecycle_ops++;
@@ -1164,11 +1321,111 @@ static void present_draw_cursor(int dx, int dy, int dw, int dh)
         G.glDisable(GL_SCISSOR_TEST);
 }
 
+static void pixel_probe_target(const char *stage, uint32_t fb, int w, int h,
+                               unsigned swap)
+{
+    struct region { int x, y, w, h; } r[5];
+    uint8_t pixels[32 * 32 * 4];
+    uint64_t hash = 1469598103934665603ULL;
+    unsigned nonblack = 0, total = 0, i, j;
+    unsigned minv = 255, maxv = 0;
+    int32_t old_read = 0, old_draw = 0, old_buf = GL_BACK, old_pack = 4;
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+    void (*pixel_store)(uint32_t, int32_t) = (void *)G.glPixelStorei;
+
+    if (!pixel_probe_enabled || !read_pixels || !real_bind_fb || w < 32 || h < 32)
+        return;
+    if (real_get_integerv) {
+        real_get_integerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
+        real_get_integerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
+        real_get_integerv(GL_READ_BUFFER, &old_buf);
+        real_get_integerv(GL_PACK_ALIGNMENT, &old_pack);
+    }
+    r[0] = (struct region){w / 2 - 16, h / 2 - 16, 32, 32};
+    r[1] = (struct region){w / 4 - 8, h / 4 - 8, 16, 16};
+    r[2] = (struct region){3 * w / 4 - 8, h / 4 - 8, 16, 16};
+    r[3] = (struct region){w / 4 - 8, 3 * h / 4 - 8, 16, 16};
+    r[4] = (struct region){3 * w / 4 - 8, 3 * h / 4 - 8, 16, 16};
+    real_bind_fb(GL_READ_FRAMEBUFFER, fb);
+    if (real_read_buffer)
+        real_read_buffer(fb ? GL_COLOR_ATTACHMENT0 : GL_BACK);
+    if (pixel_store)
+        pixel_store(GL_PACK_ALIGNMENT, 1);
+    for (i = 0; i < 5; ++i) {
+        size_t bytes = (size_t)r[i].w * (size_t)r[i].h * 4u;
+        memset(pixels, 0, sizeof(pixels));
+        read_pixels(r[i].x, r[i].y, r[i].w, r[i].h, GL_RGBA,
+                    GL_UNSIGNED_BYTE, pixels);
+        for (j = 0; j < bytes; ++j) {
+            hash ^= pixels[j];
+            hash *= 1099511628211ULL;
+            if ((j & 3u) != 3u) {
+                if (pixels[j] != 0)
+                    nonblack++;
+                if (pixels[j] < minv)
+                    minv = pixels[j];
+                if (pixels[j] > maxv)
+                    maxv = pixels[j];
+                total++;
+            }
+        }
+    }
+    if (pixel_dump_enabled && swap == 10) {
+        size_t full_bytes = (size_t)w * (size_t)h * 4u;
+        uint8_t *full = malloc(full_bytes);
+        if (full) {
+            char path[96];
+            FILE *ppm;
+            uint64_t full_hash = 1469598103934665603ULL;
+            size_t k;
+            read_pixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, full);
+            for (k = 0; k < full_bytes; ++k) {
+                full_hash ^= full[k];
+                full_hash *= 1099511628211ULL;
+            }
+            snprintf(path, sizeof(path), "/tmp/tspgl-pixel-%s.ppm", stage);
+            ppm = fopen(path, "wb");
+            if (ppm) {
+                int y;
+                fprintf(ppm, "P6\n%d %d\n255\n", w, h);
+                for (y = h - 1; y >= 0; --y) {
+                    int x;
+                    uint8_t *row = full + (size_t)y * (size_t)w * 4u;
+                    for (x = 0; x < w; ++x)
+                        fwrite(row + (size_t)x * 4u, 1u, 3u, ppm);
+                }
+                fclose(ppm);
+                fprintf(stderr, "GUA-PIX dump swap=%u stage=%s path=%s "
+                        "hash=%016llx\\n", swap, stage, path,
+                        (unsigned long long)full_hash);
+            }
+            free(full);
+        }
+    }
+    fprintf(stderr,
+            "GUA-PIX swap=%u stage=%s fb=%u size=%dx%d hash=%016llx "
+            "nonblack=%u/%u min=%u max=%u\\n", swap, stage, fb, w, h,
+            (unsigned long long)hash, nonblack, total, minv, maxv);
+    if (pixel_store)
+        pixel_store(GL_PACK_ALIGNMENT, old_pack);
+    if (real_read_buffer)
+        real_read_buffer((uint32_t)old_buf);
+    real_bind_fb(GL_READ_FRAMEBUFFER, old_read > 0 ? (uint32_t)old_read : 0);
+    real_bind_fb(GL_DRAW_FRAMEBUFFER, old_draw > 0 ? (uint32_t)old_draw : 0);
+}
+
+static int pixel_probe_swap(unsigned swap)
+{
+    return swap == 1 || swap == 2 || swap == 3 || swap == 10 || swap == 30;
+}
+
 static void present_swap(void)
 {
     void (*blit)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
                  int32_t, uint32_t, uint32_t) = G.glBlitFramebuffer;
     int dw, dh, dx, dy;
+    unsigned swap = ++pixel_swap_count;
 
     if (!game_fbo) {
         present_draw_cursor(0, 0, win_w, win_h);
@@ -1226,6 +1483,12 @@ static void present_swap(void)
     if (scissor_on && G.glDisable)
         G.glDisable(GL_SCISSOR_TEST);
 
+    if (pixel_probe_swap(swap)) {
+        if (gl_diag_last_draw_fb)
+            pixel_probe_target("app", gl_diag_last_draw_fb, game_w, game_h, swap);
+        pixel_probe_target("game", game_fbo, game_w, game_h, swap);
+    }
+
     if (real_bind_fb) {
         real_bind_fb(GL_READ_FRAMEBUFFER, game_fbo);
         real_bind_fb(GL_DRAW_FRAMEBUFFER, 0);
@@ -1236,12 +1499,16 @@ static void present_swap(void)
         int32_t actual_fb = 0;
         if (real_get_integerv)
             real_get_integerv(GL_FRAMEBUFFER_BINDING, &actual_fb);
-        fprintf(stderr, "GUA-SWAP bound-fb=%d game-fbo=%u last-draw-fb=%u\\n",
-                (int)actual_fb, game_fbo, gl_diag_last_draw_fb);
+        fprintf(stderr, "GUA-SWAP swap=%u bound-fb=%d game-fbo=%u last-draw-fb=%u\\n",
+                swap, (int)actual_fb, game_fbo, gl_diag_last_draw_fb);
     }
     if (blit)
         blit(0, 0, game_w, game_h, dx, dy, dx + dw, dy + dh,
              GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (pixel_probe_swap(swap))
+        pixel_probe_target("window", 0, win_w, win_h, swap);
+    if (swap_finish && G.glFinish)
+        G.glFinish();
     present_draw_cursor(dx, dy, dw, dh);
     sdl.gl_swap(window);
     tspgl_stage_flip();
@@ -1377,11 +1644,34 @@ static int handle_client(int fd)
                         game_w, game_h);
             }
         }
+        if (khr_debug_enabled || getenv("GUACAMELEE_OP_RING")) {
+            uint32_t i, n = h.len / 4u;
+            int32_t x = 0;
+            khr_seq = h.seq;
+            khr_op = h.op;
+            memset(khr_args, 0, sizeof(khr_args));
+            if (n > 6)
+                n = 6;
+            for (i = 0; i < n; ++i)
+                memcpy(&khr_args[i], in + i * 4u, 4);
+            if (real_get_integerv) {
+                real_get_integerv(GL_FRAMEBUFFER_BINDING, &x);
+                khr_fb = x > 0 ? (uint32_t)x : 0;
+                real_get_integerv(GL_CURRENT_PROGRAM, &x);
+                khr_prog = x > 0 ? (uint32_t)x : 0;
+            }
+            op_ring_capture(h.seq, h.op, in, h.len);
+        }
         rc = tspgl_dispatch_simple(h.op, (const uint32_t *)dispatch_in,
                                    h.len, (uint32_t *)out, &out_n);
         if (rc != 0)
             rc = tspgl_dispatch_special(h.op, dispatch_in, h.len, out,
                                          &out_n);
+        if (h.op == OP_glGetError && out_n >= 4) {
+            uint32_t err = 0;
+            memcpy(&err, out, 4);
+            op_ring_dump(err);
+        }
         gl_diag_fbo_result(h.op, out, out_n, rc);
         gl_diag_fbo_lifecycle(h.op, in, h.len);
         if (h.op == OP_glFinish)
@@ -1541,6 +1831,27 @@ int main(void)
         rb_format_fix = rf && atoi(rf) != 0;
     }
     {
+        const char *pp = getenv("GUACAMELEE_PIXEL_PROBE");
+        const char *pd = getenv("GUACAMELEE_PIXEL_DUMP");
+        pixel_probe_enabled = pp && atoi(pp) != 0;
+        pixel_dump_enabled = pd && atoi(pd) != 0;
+    }
+    {
+        const char *or = getenv("GUACAMELEE_OP_RING");
+        if (or && atoi(or) != 0)
+            fprintf(stderr, "GUA-RING enabled\\n");
+    }
+    {
+        const char *sf = getenv("TSPGL_SWAP_FINISH");
+        swap_finish = sf && atoi(sf) != 0;
+    }
+    {
+        const char *si = getenv("TSPGL_SWAP_INTERVAL");
+        swap_interval = si ? atoi(si) : 0;
+        if (swap_interval < 0)
+            swap_interval = 0;
+    }
+    {
         const char *mode = getenv("TSPGL_PRESENT");
 #ifdef TSPGL_DEFAULT_LETTERBOX
         present_letterbox = 1;
@@ -1615,9 +1926,12 @@ int main(void)
         return 1;
     }
     if (sdl.gl_set_swap)
-        sdl.gl_set_swap(0);
+        sdl.gl_set_swap(swap_interval);
     sdl.show_cursor(0);
-    fprintf(stderr, "tspgl-srv: window %dx%d GL context ok\n", win_w, win_h);
+    fprintf(stderr, "tspgl-srv: window %dx%d GL context ok driver=%s swap_interval=%d\n",
+            win_w, win_h,
+            sdl.get_current_video_driver ? sdl.get_current_video_driver() : "unknown",
+            swap_interval);
 
     memset(&G, 0, sizeof(G));
     tspgl_load_simple(gl_get);
@@ -1632,6 +1946,7 @@ int main(void)
         G.glBindVertexArray = gl_get("glBindVertexArrayOES");
     if (!G.glIsVertexArray)
         G.glIsVertexArray = gl_get("glIsVertexArrayOES");
+    khr_debug_setup();
     {
         const uint8_t *(*gs)(uint32_t) = (void *)G.glGetString;
         const char *ven = "", *ren = "", *ver = "", *ext = "";

@@ -31,6 +31,18 @@ static int frontend_diag_enabled(void)
     return v && *v && v[0] != '0';
 }
 
+static int frontend_rb_size_fix_enabled(void)
+{
+    const char *v = getenv("GUACAMELEE_FRONTEND_RB_SIZE_FIX");
+    return v && *v && v[0] != '0';
+}
+
+__attribute__((constructor))
+static void clear_preload_for_children(void)
+{
+    unsetenv("LD_PRELOAD");
+}
+
 static unsigned frontend_diag_count;
 
 __attribute__((visibility("default")))
@@ -45,6 +57,15 @@ void glRenderbufferStorage(unsigned target, unsigned internalformat,
         handle = gl4es_handle();
     if (!real_fn && handle)
         real_fn = (fn_t)dlsym(handle, "glRenderbufferStorage");
+    if (frontend_rb_size_fix_enabled() && width == 0 && height == 0) {
+        const char *sw = getenv("GUACAMELEE_FRONTEND_WIDTH");
+        const char *sh = getenv("GUACAMELEE_FRONTEND_HEIGHT");
+        width = (sw && *sw) ? atoi(sw) : 1024;
+        height = (sh && *sh) ? atoi(sh) : 768;
+        fprintf(stderr,
+                "GUA-FRONTEND rb-size 0x0 -> %dx%d fmt=0x%x\\n",
+                width, height, internalformat);
+    }
     if (frontend_diag_enabled() && frontend_diag_count < 128)
         fprintf(stderr,
                 "GUA-HARDEXT frontend rb-storage#%u target=0x%x "

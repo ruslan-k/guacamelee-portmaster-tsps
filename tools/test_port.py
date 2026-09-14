@@ -55,6 +55,7 @@ def main() -> int:
     server_main_source = (ROOT / "src" / "glbridge" / "server.c").read_text()
     frame_source = (ROOT / "src" / "nfsmw_frame.h").read_text()
     launcher_source = (ROOT / "portmaster" / "Guacamelee.sh").read_text()
+    hardext_source = (ROOT / "compat" / "hardext_fix.c").read_text()
     assert 'TSPGL_WIDTH' in source and 'TSPGL_HEIGHT' in source
     assert 'eglQuerySurface' in source
     assert "src[total++] = '\\n';" in server_source
@@ -93,7 +94,14 @@ def main() -> int:
     assert 'GUA-TEX image#' in server_main_source
     assert 'GUA-TEX copy' in server_main_source
     assert 'GUA-DRAW' in server_main_source
-    assert 'GUA-SWAP bound-fb' in server_main_source
+    assert 'GUA-SWAP swap=' in server_main_source
+    assert 'GUA-PIX swap=' in server_main_source
+    assert 'GUA-KHRDBG' in server_main_source
+    assert 'GUA-RING' in server_main_source
+    assert 'GUACAMELEE_KHR_DEBUG="${GUACAMELEE_KHR_DEBUG:-0}"' in launcher_source
+    assert 'GUACAMELEE_OP_RING="${GUACAMELEE_OP_RING:-0}"' in launcher_source
+    assert 'GUACAMELEE_PIXEL_PROBE="${GUACAMELEE_PIXEL_PROBE:-0}"' in launcher_source
+    assert 'GUACAMELEE_PIXEL_DUMP="${GUACAMELEE_PIXEL_DUMP:-0}"' in launcher_source
     assert 'GUACAMELEE_FBO_LIFECYCLE="${GUACAMELEE_FBO_LIFECYCLE:-0}"' in launcher_source
     assert 'LIBGL_FBOFORCETEX="${GUACAMELEE_LIBGL_FBOFORCETEX:-1}"' in launcher_source
     assert 'GUACAMELEE_REAL_GLERROR="${GUACAMELEE_REAL_GLERROR:-0}"' in launcher_source
@@ -102,7 +110,8 @@ def main() -> int:
     assert 'GUACAMELEE_RB_ZERO_SIZE="${GUACAMELEE_RB_ZERO_SIZE:-0}"' in launcher_source
     assert 'GUACAMELEE_FBO_TEXTURE_FALLBACK="${GUACAMELEE_FBO_TEXTURE_FALLBACK:-0}"' in launcher_source
     assert 'GUACAMELEE_UNIFY_DEPTH_STENCIL="${GUACAMELEE_UNIFY_DEPTH_STENCIL:-0}"' in launcher_source
-    assert 'GUACAMELEE_RB_FORMAT_FIX="${GUACAMELEE_RB_FORMAT_FIX:-0}"' in launcher_source
+    assert 'GUACAMELEE_FRONTEND_RB_SIZE_FIX="${GUACAMELEE_FRONTEND_RB_SIZE_FIX:-0}"' in launcher_source
+    assert 'GUA-FRONTEND rb-size' in hardext_source
     assert 'TSPGL_RB_ZERO_SIZE' in server_main_source
     assert 'TSPGL_RB_FORMAT_FIX' in server_main_source
     assert 'TSPGL_FBO_TEXTURE_FALLBACK' in server_main_source
