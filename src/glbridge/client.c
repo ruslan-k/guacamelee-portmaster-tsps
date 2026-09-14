@@ -51,6 +51,9 @@ typedef void GLvoid;
 #define st_scissor (tspgl_shared()->st_scissor)
 #define unpack_align (tspgl_shared()->unpack_align)
 
+static int vao_diag = -1;
+static unsigned vao_diag_calls;
+
 #define SH_MAX 2048
 struct shbuf {
     uint32_t id;
@@ -1065,6 +1068,27 @@ void glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format,
     tspgl_call(OP_glReadPixels, hdr, 24, pixels, nb);
 }
 
+static int vao_diag_enabled(void)
+{
+    const char *v;
+    if (vao_diag >= 0)
+        return vao_diag;
+    v = getenv("GUACAMELEE_VAO_DIAG");
+    vao_diag = v && strcmp(v, "0") != 0;
+    return vao_diag;
+}
+
+static void vao_diag_log(const char *kind, uint32_t a, uint32_t b,
+                         uint32_t c, const void *ptr)
+{
+    if ((!vao_diag_enabled() && !bound_vao) || vao_diag_calls >= 256)
+        return;
+    fprintf(stderr,
+            "GUA-VAO n=%u kind=%s vao=%u array=%u element=%u a=%u b=%u c=%u "
+            "ptr=%p\\n", vao_diag_calls++, kind, bound_vao, bound_array,
+            bound_element, a, b, c, ptr);
+}
+
 void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
                            GLboolean normalized, GLsizei stride,
                            const void *ptr)
@@ -1084,6 +1108,7 @@ void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
     u[3] = normalized;
     u[4] = (uint32_t)stride;
     u[5] = attribs[index].is_offset ? attribs[index].ptr : 0xffffffffu;
+    vao_diag_log("attrib", index, (uint32_t)size, type, ptr);
     tspgl_call(OP_glVertexAttribPointer, u, 24, NULL, 0);
 }
 
@@ -1162,6 +1187,8 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count)
 {
     uint32_t u[3] = { mode, (uint32_t)first, (uint32_t)count };
     int client = has_client_arrays();
+    vao_diag_log("draw-arrays", (uint32_t)mode, (uint32_t)first,
+                 (uint32_t)count, NULL);
     send_client_arrays(first, count);
     if (client)
         u[1] = 0;
@@ -1176,6 +1203,8 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx)
     unsigned nb = indexed ? 0 : (unsigned)count * esize;
     uint8_t *buf;
     unsigned verts = (unsigned)count;
+    vao_diag_log("draw-elements", (uint32_t)mode, (uint32_t)count,
+                 (uint32_t)type, idx);
     if (!indexed && idx)
         verts = max_index_value(count, type, idx) + 1u;
     send_client_arrays(0, (GLsizei)verts);

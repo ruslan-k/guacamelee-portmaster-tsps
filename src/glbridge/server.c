@@ -204,6 +204,24 @@ static void gl_diag_fbo_result(uint32_t op, const uint8_t *out,
 #define GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL 0x8CD2
 #define GL_READ_FRAMEBUFFER 0x8CA8
 #define GL_DRAW_FRAMEBUFFER 0x8CA9
+#define GL_DRAW_BUFFER0 0x8825
+#define GL_READ_BUFFER 0x0C02
+#define GL_BLEND_EQUATION_RGB 0x8009
+#define GL_BLEND_SRC_RGB 0x80C9
+#define GL_BLEND_DST_RGB 0x80C8
+#define GL_DEPTH_FUNC 0x0B74
+#define GL_DEPTH_WRITEMASK 0x0B72
+#define GL_DEPTH_RANGE 0x0B70
+#define GL_STENCIL_TEST 0x0B90
+#define GL_STENCIL_FUNC 0x0B92
+#define GL_STENCIL_REF 0x0B97
+#define GL_STENCIL_VALUE_MASK 0x0B93
+#define GL_STENCIL_WRITEMASK 0x0B98
+#define GL_STENCIL_FAIL 0x0B94
+#define GL_STENCIL_PASS_DEPTH_FAIL 0x0B95
+#define GL_STENCIL_PASS_DEPTH_PASS 0x0B96
+#define GL_CULL_FACE_MODE 0x0B45
+#define GL_FRONT_FACE 0x0B46
 #define GL_COLOR_BUFFER_BIT 0x4000
 #define GL_NEAREST 0x2600
 #define GL_DEPTH_COMPONENT16 0x81A5
@@ -361,6 +379,13 @@ static uint32_t deferred_gl_error;
 static unsigned gl_error_trace_count;
 static int title_draw_probe = -1;
 static unsigned title_draw_probe_count;
+static int title_state_diag = -1;
+static unsigned title_full_probe_count;
+static unsigned char title_program_dumped[256];
+static int title_occlusion_diag = -1;
+static unsigned title_occlusion_count;
+static uint32_t title_occlusion_query;
+static int title_occlusion_active;
 static int swap_finish;
 static int swap_interval;
 static uint32_t now_ms(void)
@@ -1014,6 +1039,255 @@ static void gl_error_trace_after(uint32_t op, uint32_t seq)
     deferred_gl_error = err;
 }
 
+#define GL_ACTIVE_UNIFORMS 0x8B86
+#define GL_ATTACHED_SHADERS 0x8B85
+#define GL_SHADER_TYPE 0x8B4F
+#define GL_ANY_SAMPLES_PASSED 0x8C2F
+#define GL_QUERY_RESULT 0x8866
+
+static int title_occlusion_begin(uint32_t op)
+{
+    const char *v;
+    int32_t fb = 0;
+    void (*gen)(int32_t, uint32_t *) = (void *)gl_get("glGenQueries");
+    void (*begin)(uint32_t, uint32_t) = (void *)gl_get("glBeginQuery");
+
+    if (title_occlusion_diag < 0) {
+        v = getenv("GUACAMELEE_TITLE_OCCLUSION_DIAG");
+        title_occlusion_diag = v && strcmp(v, "0") != 0;
+    }
+    if (!title_occlusion_diag || title_occlusion_count >= 16 ||
+        title_occlusion_active ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !gen || !begin)
+        return 0;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (fb != 2)
+        return 0;
+    if (!title_occlusion_query)
+        gen(1, &title_occlusion_query);
+    if (!title_occlusion_query)
+        return 0;
+    begin(GL_ANY_SAMPLES_PASSED, title_occlusion_query);
+    title_occlusion_active = 1;
+    return 1;
+}
+
+static void title_occlusion_end(uint32_t seq)
+{
+    void (*end)(uint32_t) = (void *)gl_get("glEndQuery");
+    void (*get)(uint32_t, uint32_t, uint32_t *) = (void *)gl_get("glGetQueryObjectuiv");
+    uint32_t passed = 0;
+    if (!title_occlusion_active || !end || !get)
+        return;
+    end(GL_ANY_SAMPLES_PASSED);
+    get(title_occlusion_query, GL_QUERY_RESULT, &passed);
+    fprintf(stderr, "GUA-TITLE-OCCLUSION seq=%u passed=%u\\n", seq,
+            passed ? 1u : 0u);
+    ++title_occlusion_count;
+    title_occlusion_active = 0;
+}
+
+static void gl_title_program_dump(uint32_t program)
+{
+    int32_t n = 0;
+    int32_t i;
+    void (*getiv)(uint32_t, uint32_t, int32_t *) = (void *)G.glGetProgramiv;
+    void (*getactive)(uint32_t, uint32_t, int32_t, int32_t *, int32_t *,
+                      uint32_t *, char *) = (void *)G.glGetActiveUniform;
+    int32_t (*getloc)(uint32_t, const char *) = (void *)G.glGetUniformLocation;
+    void (*getuniform)(uint32_t, int32_t, int32_t *) = (void *)G.glGetUniformiv;
+    void (*getattached)(uint32_t, int32_t, int32_t *, uint32_t *) =
+        (void *)G.glGetAttachedShaders;
+    void (*shaderiv)(uint32_t, uint32_t, int32_t *) = (void *)G.glGetShaderiv;
+    void (*getsource)(uint32_t, int32_t, int32_t *, char *) =
+        (void *)G.glGetShaderSource;
+    if (!program || program >= 256 || title_program_dumped[program] ||
+        !getiv || !getactive || !getloc || !getuniform)
+        return;
+    title_program_dumped[program] = 1;
+    getiv(program, GL_ACTIVE_UNIFORMS, &n);
+    if (n < 0) n = 0;
+    if (n > 32) n = 32;
+    fprintf(stderr, "GUA-TITLE-PROG program=%u uniforms=%d\\n", program, n);
+    for (i = 0; i < n; ++i) {
+        char name[128] = {0};
+        int32_t size = 0, loc, value = 0;
+        uint32_t type = 0;
+        getactive(program, (uint32_t)i, sizeof(name), NULL, &size, &type, name);
+        loc = getloc(program, name);
+        if (loc >= 0)
+            getuniform(program, loc, &value);
+        fprintf(stderr,
+                "GUA-TITLE-UNIFORM program=%u index=%d name=%s loc=%d "
+                "size=%d type=0x%x value=%d\\n",
+                program, i, name, loc, size, type, value);
+    }
+    if (getattached && shaderiv && getsource) {
+        uint32_t shaders[8] = {0};
+        int32_t count = 0;
+        getattached(program, 8, &count, shaders);
+        if (count > 8) count = 8;
+        for (i = 0; i < count; ++i) {
+            int32_t type = 0, length = 0;
+            char source[4096] = {0};
+            shaderiv(shaders[i], GL_SHADER_TYPE, &type);
+            getsource(shaders[i], (int32_t)sizeof(source) - 1, &length, source);
+            if (length < 0) length = 0;
+            if (length >= (int32_t)sizeof(source)) length = sizeof(source) - 1;
+            source[length] = 0;
+            fprintf(stderr, "GUA-TITLE-SHADER program=%u shader=%u type=0x%x bytes=%d\\n%s\\n",
+                    program, shaders[i], type, length, source);
+        }
+    }
+}
+
+static void gl_title_texture_units(uint32_t program, uint32_t seq)
+{
+    int32_t old_active = 0, bindings[4] = {0};
+    unsigned i;
+    if (!real_get_integerv || !G.glActiveTexture)
+        return;
+    real_get_integerv(GL_ACTIVE_TEXTURE, &old_active);
+    for (i = 0; i < 4; ++i) {
+        G.glActiveTexture(GL_TEXTURE0 + i);
+        real_get_integerv(GL_TEXTURE_BINDING_2D, &bindings[i]);
+    }
+    G.glActiveTexture((uint32_t)old_active);
+    fprintf(stderr,
+            "GUA-TITLE-TEX seq=%u prog=%u active=0x%x unit0=%d unit1=%d "
+            "unit2=%d unit3=%d\\n", seq, program, old_active,
+            bindings[0], bindings[1], bindings[2], bindings[3]);
+}
+
+static void gl_title_full_probe(const char *stage, uint32_t fb,
+                                int width, int height, uint32_t seq)
+{
+    uint8_t *pixels;
+    int32_t old_fb = 0;
+    int x, y;
+    unsigned nonblack = 0;
+    unsigned minv = 255, maxv = 0;
+    int minx = width, miny = height, maxx = -1, maxy = -1;
+    uint64_t hash = 1469598103934665603ULL;
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+
+    if (!real_get_integerv || !real_bind_fb || !read_pixels ||
+        width <= 0 || height <= 0)
+        return;
+    pixels = malloc((size_t)width * (size_t)height * 4u);
+    if (!pixels)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &old_fb);
+    real_bind_fb(GL_FRAMEBUFFER, fb);
+    read_pixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    for (y = 0; y < height; ++y) {
+        for (x = 0; x < width; ++x) {
+            const uint8_t *p = pixels + ((size_t)y * (size_t)width + (size_t)x) * 4u;
+            unsigned c;
+            int pixel_nonblack = 0;
+            for (c = 0; c < 3; ++c) {
+                if (p[c]) pixel_nonblack = 1;
+                if (p[c] < minv) minv = p[c];
+                if (p[c] > maxv) maxv = p[c];
+                hash ^= p[c];
+                hash *= 1099511628211ULL;
+            }
+            if (pixel_nonblack) {
+                ++nonblack;
+                if (x < minx) minx = x;
+                if (x > maxx) maxx = x;
+                if (y < miny) miny = y;
+                if (y > maxy) maxy = y;
+            }
+        }
+    }
+    real_bind_fb(GL_FRAMEBUFFER, (uint32_t)old_fb);
+    fprintf(stderr,
+            "GUA-TITLE-FULL stage=%s seq=%u fb=%u hash=%016llx "
+            "nonblack=%u/%u min=%u max=%u bbox=%d,%d..%d,%d\\n",
+            stage, seq, fb, (unsigned long long)hash, nonblack,
+            (unsigned)(width * height), minv, maxv,
+            minx < width ? minx : -1, miny < height ? miny : -1,
+            maxx, maxy);
+    free(pixels);
+}
+
+static void gl_title_state_snapshot(uint32_t op, const uint8_t *in,
+                                    uint32_t len, uint32_t seq)
+{
+    const char *v;
+    int32_t fb = 0, status = 0, drawbuf = 0, readbuf = 0;
+    int32_t vp[4] = {0}, sc[4] = {0}, color[4] = {0};
+    int32_t blend = 0, blend_eq = 0, blend_src = 0, blend_dst = 0;
+    int32_t depth = 0, depth_func = 0, depth_write = 0;
+    int32_t stencil = 0, stencil_func = 0, stencil_ref = 0;
+    int32_t stencil_value = 0, stencil_write = 0, cull = 0;
+    int32_t cull_face = 0, front_face = 0, program = 0;
+    unsigned mode = 0, count = 0, type = 0, idx = 0;
+
+    if (title_state_diag < 0) {
+        v = getenv("GUACAMELEE_TITLE_STATE_DIAG");
+        title_state_diag = v && strcmp(v, "0") != 0;
+    }
+    if (!title_state_diag ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !real_check_fb)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (fb != 2)
+        return;
+    status = (int32_t)real_check_fb(GL_FRAMEBUFFER);
+    real_get_integerv(GL_DRAW_BUFFER0, &drawbuf);
+    real_get_integerv(GL_READ_BUFFER, &readbuf);
+    real_get_integerv(GL_VIEWPORT, vp);
+    real_get_integerv(GL_SCISSOR_BOX, sc);
+    real_get_integerv(GL_COLOR_WRITEMASK, color);
+    real_get_integerv(GL_BLEND, &blend);
+    real_get_integerv(GL_BLEND_EQUATION_RGB, &blend_eq);
+    real_get_integerv(GL_BLEND_SRC_RGB, &blend_src);
+    real_get_integerv(GL_BLEND_DST_RGB, &blend_dst);
+    real_get_integerv(GL_DEPTH_TEST, &depth);
+    real_get_integerv(GL_DEPTH_FUNC, &depth_func);
+    real_get_integerv(GL_DEPTH_WRITEMASK, &depth_write);
+    real_get_integerv(GL_STENCIL_TEST, &stencil);
+    real_get_integerv(GL_STENCIL_FUNC, &stencil_func);
+    real_get_integerv(GL_STENCIL_REF, &stencil_ref);
+    real_get_integerv(GL_STENCIL_VALUE_MASK, &stencil_value);
+    real_get_integerv(GL_STENCIL_WRITEMASK, &stencil_write);
+    real_get_integerv(GL_CULL_FACE, &cull);
+    real_get_integerv(GL_CULL_FACE_MODE, &cull_face);
+    real_get_integerv(GL_FRONT_FACE, &front_face);
+    real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    if (len >= 12) {
+        memcpy(&mode, in, 4);
+        if (op == OP_glDrawArrays)
+            memcpy(&count, in + 8, 4);
+        else
+            memcpy(&count, in + 4, 4);
+    }
+    if (op == OP_glDrawElements && len >= 16) {
+        memcpy(&type, in + 8, 4);
+        memcpy(&idx, in + 12, 4);
+    }
+    fprintf(stderr,
+            "GUA-TITLE-STATE seq=%u fb=%d status=0x%x drawbuf=0x%x "
+            "readbuf=0x%x prog=%d op=%s mode=0x%x count=%u type=0x%x idx=0x%x "
+            "vp=%d,%d,%d,%d scissor=%d box=%d,%d,%d,%d color=%d%d%d%d "
+            "blend=%d eq=0x%x src=0x%x dst=0x%x depth=%d func=0x%x write=%d "
+            "stencil=%d func=0x%x ref=%d value=0x%x write=0x%x "
+            "cull=%d face=0x%x front=0x%x\\n",
+            seq, fb, status, drawbuf, readbuf, program,
+            op == OP_glDrawArrays ? "DrawArrays" : "DrawElements",
+            mode, count, type, idx, vp[0], vp[1], vp[2], vp[3],
+            G.glIsEnabled ? G.glIsEnabled(GL_SCISSOR_TEST) : -1,
+            sc[0], sc[1], sc[2], sc[3], color[0], color[1], color[2], color[3],
+            blend, blend_eq, blend_src, blend_dst, depth, depth_func,
+            depth_write, stencil, stencil_func, stencil_ref, stencil_value,
+            stencil_write, cull, cull_face, front_face);
+}
+
 static void gl_title_draw_probe(uint32_t op, uint32_t seq)
 {
     const char *v;
@@ -1035,6 +1309,13 @@ static void gl_title_draw_probe(uint32_t op, uint32_t seq)
     real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
     if (fb != 2)
         return;
+    {
+        int32_t program = 0;
+        if (real_get_integerv)
+            real_get_integerv(GL_CURRENT_PROGRAM, &program);
+        gl_title_program_dump((uint32_t)program);
+        gl_title_texture_units((uint32_t)program, seq);
+    }
     memset(pixels, 0, sizeof(pixels));
     read_pixels(0, 0, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     for (i = 0; i < sizeof(pixels); ++i) {
@@ -1043,10 +1324,15 @@ static void gl_title_draw_probe(uint32_t op, uint32_t seq)
         if ((i & 3u) != 3u && pixels[i] != 0)
             ++nonblack;
     }
-    fprintf(stderr, "GUA-TITLE-PIX draw=%u seq=%u op=%s fb=%d nonblack=%u/768 "
-            "hash=%016llx\\n", title_draw_probe_count++, seq,
-            op == OP_glDrawArrays ? "DrawArrays" : "DrawElements", (int)fb,
-            nonblack, (unsigned long long)hash);
+    {
+        unsigned draw_index = title_draw_probe_count++;
+        fprintf(stderr, "GUA-TITLE-PIX draw=%u seq=%u op=%s fb=%d nonblack=%u/768 "
+                "hash=%016llx\\n", draw_index, seq,
+                op == OP_glDrawArrays ? "DrawArrays" : "DrawElements", (int)fb,
+                nonblack, (unsigned long long)hash);
+        if (draw_index == 15)
+            gl_title_full_probe("draw16", 2, game_w, game_h, seq);
+    }
 }
 
 static void gl_diag_fbo_transition(uint32_t op, const uint8_t *in,
@@ -1750,6 +2036,8 @@ static void present_swap(void)
     if (pixel_probe_swap(swap)) {
         if (gl_diag_last_draw_fb)
             pixel_probe_target("app", gl_diag_last_draw_fb, game_w, game_h, swap);
+        if (swap == 300 && gl_diag_last_draw_fb == 2)
+            gl_title_full_probe("swap300", 2, game_w, game_h, swap);
         pixel_probe_target("game", game_fbo, game_w, game_h, swap);
     }
 
@@ -1926,11 +2214,13 @@ static int handle_client(int fd)
             }
             op_ring_capture(h.seq, h.op, in, h.len);
         }
+        title_occlusion_begin(h.op);
         rc = tspgl_dispatch_simple(h.op, (const uint32_t *)dispatch_in,
                                    h.len, (uint32_t *)out, &out_n);
         if (rc != 0)
             rc = tspgl_dispatch_special(h.op, dispatch_in, h.len, out,
                                          &out_n);
+        title_occlusion_end(h.seq);
         if (h.op == OP_glGetError && out_n >= 4) {
             uint32_t err = 0;
             memcpy(&err, out, 4);
@@ -1944,6 +2234,7 @@ static int handle_client(int fd)
         }
         gl_diag_fbo_lifecycle(h.op, in, h.len);
         gl_diag_fbo_transition(h.op, in, h.len);
+        gl_title_state_snapshot(h.op, in, h.len, h.seq);
         gl_title_draw_probe(h.op, h.seq);
         if (h.op == OP_glFinish)
             tspgl_stage_flip();

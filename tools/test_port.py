@@ -110,6 +110,9 @@ def main() -> int:
     assert 'GUACAMELEE_MIPMAP_DIAG="${GUACAMELEE_MIPMAP_DIAG:-0}"' in launcher_source
     assert 'GUACAMELEE_SKIP_BAD_MIPMAP="${GUACAMELEE_SKIP_BAD_MIPMAP:-0}"' in launcher_source
     assert 'GUACAMELEE_TITLE_DRAW_PROBE="${GUACAMELEE_TITLE_DRAW_PROBE:-0}"' in launcher_source
+    assert 'GUACAMELEE_TITLE_STATE_DIAG="${GUACAMELEE_TITLE_STATE_DIAG:-0}"' in launcher_source
+    assert 'GUACAMELEE_VAO_DIAG="${GUACAMELEE_VAO_DIAG:-0}"' in launcher_source
+    assert 'GUACAMELEE_TITLE_OCCLUSION_DIAG="${GUACAMELEE_TITLE_OCCLUSION_DIAG:-0}"' in launcher_source
     assert 'GUACAMELEE_FBO_LIFECYCLE="${GUACAMELEE_FBO_LIFECYCLE:-0}"' in launcher_source
     assert 'LIBGL_FBOFORCETEX="${GUACAMELEE_LIBGL_FBOFORCETEX:-1}"' in launcher_source
     assert 'GUACAMELEE_REAL_GLERROR="${GUACAMELEE_REAL_GLERROR:-0}"' in launcher_source
