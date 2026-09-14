@@ -122,7 +122,9 @@ if [ "$BRIDGE" -eq 1 ]; then
 
   export PORT_32BIT=Y
   export LD_LIBRARY_PATH="$GLBRIDGE:$GAMEDIR/box86/native:$SYS/lib/arm-linux-gnueabihf:$SYS/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-  export BOX86_LD_LIBRARY_PATH="$GAMEDIR/box86/x86:$GAMEDIR/gamedata/lib32:$GAMEDIR/libs/x86"
+  export BOX86_LD_LIBRARY_PATH="$GAMEDIR/box86/native:$GAMEDIR/box86/x86:$GAMEDIR/gamedata/lib32:$GAMEDIR/libs/x86"
+  export BOX86_PREFER_WRAPPED=1
+  export BOX86_X11THREADS=1
   export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es/libGL.so.1"
   export SDL_VIDEO_EGL_DRIVER="$GLBRIDGE/libEGL.so.1"
   export LIBGL_GLES="$GLBRIDGE/libGLESv2.so.2"
