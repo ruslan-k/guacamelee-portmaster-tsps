@@ -132,8 +132,17 @@ if [ "$BRIDGE" -eq 1 ]; then
   export SDL_VIDEO_EGL_DRIVER="$GLBRIDGE/libEGL.so.1"
   export LIBGL_GLES="$GLBRIDGE/libGLESv2.so.2"
   export LIBGL_EGL="$GLBRIDGE/libEGL.so.1"
-  export LIBGL_ES=2
-  export LIBGL_GL=21
+  export LIBGL_ES="${GUACAMELEE_LIBGL_ES:-2}"
+  export LIBGL_GL="${GUACAMELEE_LIBGL_GL:-21}"
+
+  # gl4es' normal hardware discovery compiles desktop-GLSL probe shaders such
+  # as `#version 120` + GL_IMG_uniform_buffer_object + layout(location=...).
+  # That test is useful with a direct vendor GLES driver, but it is misleading
+  # through the 32->64 proxy: the guest sees a GLES2 bridge while the presenter
+  # owns a GLES3.2 Mali context. Keep gl4es on its conservative GLES2 baseline
+  # during bring-up. Set GUACAMELEE_LIBGL_NOTEST=0 only for a controlled A/B.
+  export LIBGL_NOTEST="${GUACAMELEE_LIBGL_NOTEST:-1}"
+
   export LIBGL_SHRINK="${GUACAMELEE_LIBGL_SHRINK:-4}"
   export LIBGL_FB="${GUACAMELEE_LIBGL_FB:-1}"
   chmod 0755 "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin" "$LD"
@@ -141,6 +150,7 @@ if [ "$BRIDGE" -eq 1 ]; then
   echo "bridge_presenter=$PRESENTER"
   echo "bridge_loader=$LD"
   echo "bridge_dimensions=${TSPGL_WIDTH}x${TSPGL_HEIGHT}"
+  echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fb=$LIBGL_FB"
   $GPTOKEYB2 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
   pm_platform_helper "$GAMEDIR/box86/box86"
   "$LD" --library-path "$LD_LIBRARY_PATH" "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin"
