@@ -14,7 +14,7 @@ x86 game
   -> system Mali GLES
 ```
 
-The presenter and ARMHF sysroot are copied from the known-good Galaxy on Fire 2 bridge architecture. The GLES client/server source is in `src/glbridge/` and includes the Guacamelee-specific configurable surface dimensions.
+The presenter and ARMHF sysroot are copied from the known-good Galaxy on Fire 2 bridge architecture. The port also carries the ARMHF SDL2/X11/DRM closure required by Box86 under `box86/native`; AArch64 SDL2 is not ABI-compatible with the ARMHF Box86 process. The GLES client/server source is in `src/glbridge/` and includes the Guacamelee-specific configurable surface dimensions.
 
 ## Source and game data
 

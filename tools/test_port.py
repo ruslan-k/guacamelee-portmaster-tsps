@@ -33,6 +33,7 @@ def main() -> int:
 
     required = [
         PORT / "box86" / "box86",
+        PORT / "box86" / "native" / "libSDL2-2.0.so.0",
         PORT / "gl4es" / "libGL.so.1",
         PORT / "guacamelee_present",
         PORT / "armhf" / "lib" / "ld-linux-armhf.so.3",
