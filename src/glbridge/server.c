@@ -315,6 +315,9 @@ static uint32_t depth_stencil_rb;
 int win_w = 1280;
 int win_h = 720;
 static int present_letterbox;
+static int present_last_fbo;
+static int present_set_read_buffer;
+static int present_hold_swap;
 uint32_t game_fbo;
 uint32_t game_color;
 uint32_t game_depth;
@@ -386,6 +389,16 @@ static int title_occlusion_diag = -1;
 static unsigned title_occlusion_count;
 static uint32_t title_occlusion_query;
 static int title_occlusion_active;
+static int title_white_tex_diag = -1;
+static uint32_t title_white_tex;
+static int title_white_tex_active;
+static int32_t title_white_old_active;
+static int32_t title_white_old_binding;
+static int title_white_color_diag = -1;
+static int title_white_color_active;
+static int32_t title_white_color_loc;
+static int32_t title_white_color_enabled;
+static float title_white_color_old[4];
 static int swap_finish;
 static int swap_interval;
 static uint32_t now_ms(void)
@@ -1097,6 +1110,7 @@ static void gl_title_program_dump(uint32_t program)
                       uint32_t *, char *) = (void *)G.glGetActiveUniform;
     int32_t (*getloc)(uint32_t, const char *) = (void *)G.glGetUniformLocation;
     void (*getuniform)(uint32_t, int32_t, int32_t *) = (void *)G.glGetUniformiv;
+    void (*getuniformfv)(uint32_t, int32_t, float *) = (void *)G.glGetUniformfv;
     void (*getattached)(uint32_t, int32_t, int32_t *, uint32_t *) =
         (void *)G.glGetAttachedShaders;
     void (*shaderiv)(uint32_t, uint32_t, int32_t *) = (void *)G.glGetShaderiv;
@@ -1112,16 +1126,35 @@ static void gl_title_program_dump(uint32_t program)
     fprintf(stderr, "GUA-TITLE-PROG program=%u uniforms=%d\\n", program, n);
     for (i = 0; i < n; ++i) {
         char name[128] = {0};
-        int32_t size = 0, loc, value = 0;
+        int32_t size = 0, loc, value = 0, value_valid = 0;
+        int32_t values[64] = {0};
+        float fvalues[16] = {0};
+        int float_valid = 0;
         uint32_t type = 0;
         getactive(program, (uint32_t)i, sizeof(name), NULL, &size, &type, name);
         loc = getloc(program, name);
-        if (loc >= 0)
-            getuniform(program, loc, &value);
+        if (loc >= 0 && (type == 0x8b5e || type == 0x8b5f ||
+                         type == 0x8b60 || type == 0x8b61 ||
+                         type == 0x8b62 || type == 0x8b63 ||
+                         type == 0x8b64 || type == 0x8b65 ||
+                         type == 0x1404 || type == 0x8b56 ||
+                         type == 0x8b53 || type == 0x8b57)) {
+            getuniform(program, loc, values);
+            value = values[0];
+            value_valid = 1;
+        } else if (loc >= 0 && getuniformfv &&
+                   (type == 0x8b50 || type == 0x8b51 || type == 0x8b52 ||
+                    type == 0x8b53 || type == 0x8b5b || type == 0x8b5c ||
+                    type == 0x8b5d)) {
+            getuniformfv(program, loc, fvalues);
+            float_valid = 1;
+        }
         fprintf(stderr,
                 "GUA-TITLE-UNIFORM program=%u index=%d name=%s loc=%d "
-                "size=%d type=0x%x value=%d\\n",
-                program, i, name, loc, size, type, value);
+                "size=%d type=0x%x ivalue=%d ivalid=%d "
+                "f=%g,%g,%g,%g fvalid=%d\\n",
+                program, i, name, loc, size, type, value, value_valid,
+                fvalues[0], fvalues[1], fvalues[2], fvalues[3], float_valid);
     }
     if (getattached && shaderiv && getsource) {
         uint32_t shaders[8] = {0};
@@ -1158,6 +1191,118 @@ static void gl_title_texture_units(uint32_t program, uint32_t seq)
             "GUA-TITLE-TEX seq=%u prog=%u active=0x%x unit0=%d unit1=%d "
             "unit2=%d unit3=%d\\n", seq, program, old_active,
             bindings[0], bindings[1], bindings[2], bindings[3]);
+}
+
+static int title_white_color_begin(uint32_t op, uint32_t seq)
+{
+    const char *v;
+    int32_t fb = 0, program = 0;
+    int32_t (*getloc)(uint32_t, const char *) = (void *)G.glGetAttribLocation;
+    void (*getiv)(uint32_t, uint32_t, int32_t *) = (void *)G.glGetVertexAttribiv;
+    void (*getfv)(uint32_t, uint32_t, float *) = (void *)G.glGetVertexAttribfv;
+    void (*disable)(uint32_t) = (void *)G.glDisableVertexAttribArray;
+    void (*set4f)(uint32_t, float, float, float, float) = (void *)G.glVertexAttrib4f;
+
+    if (title_white_color_diag < 0) {
+        v = getenv("GUACAMELEE_TITLE_WHITE_COLOR");
+        title_white_color_diag = v && atoi(v) != 0;
+    }
+    if (!title_white_color_diag || title_white_color_active ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !getloc || !getiv || !getfv || !disable || !set4f)
+        return 0;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    if (fb != 2 || program != 2)
+        return 0;
+    title_white_color_loc = getloc((uint32_t)program, "in_colour0");
+    if (title_white_color_loc < 0)
+        return 0;
+    getiv((uint32_t)title_white_color_loc, 0x8622, &title_white_color_enabled);
+    getfv((uint32_t)title_white_color_loc, 0x8626, title_white_color_old);
+    if (title_white_color_enabled)
+        disable((uint32_t)title_white_color_loc);
+    set4f((uint32_t)title_white_color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
+    fprintf(stderr, "GUA-TITLE-WHITE-COLOR seq=%u loc=%d enabled=%d\\n",
+            seq, (int)title_white_color_loc, (int)title_white_color_enabled);
+    title_white_color_active = 1;
+    return 1;
+}
+
+static void title_white_color_end(void)
+{
+    void (*enable)(uint32_t) = (void *)G.glEnableVertexAttribArray;
+    void (*disable)(uint32_t) = (void *)G.glDisableVertexAttribArray;
+    void (*set4f)(uint32_t, float, float, float, float) = (void *)G.glVertexAttrib4f;
+    if (!title_white_color_active || !enable || !disable || !set4f)
+        return;
+    set4f((uint32_t)title_white_color_loc,
+          title_white_color_old[0], title_white_color_old[1],
+          title_white_color_old[2], title_white_color_old[3]);
+    if (title_white_color_enabled)
+        enable((uint32_t)title_white_color_loc);
+    else
+        disable((uint32_t)title_white_color_loc);
+    title_white_color_active = 0;
+}
+
+static int title_white_texture_begin(uint32_t op, uint32_t seq)
+{
+    const char *v;
+    int32_t fb = 0, program = 0;
+    void (*gen)(int32_t, uint32_t *) = (void *)G.glGenTextures;
+    void (*bind)(uint32_t, uint32_t) = (void *)G.glBindTexture;
+    void (*active)(uint32_t) = (void *)G.glActiveTexture;
+    void (*parami)(uint32_t, uint32_t, int32_t) = (void *)G.glTexParameteri;
+    void (*image)(uint32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
+                  uint32_t, uint32_t, const void *) = (void *)G.glTexImage2D;
+    static const uint8_t white[4] = {255, 255, 255, 255};
+
+    if (title_white_tex_diag < 0) {
+        v = getenv("GUACAMELEE_TITLE_WHITE_TEX");
+        title_white_tex_diag = v && atoi(v) != 0;
+    }
+    if (!title_white_tex_diag || title_white_tex_active ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !active || !bind || !gen || !parami || !image)
+        return 0;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    if (fb != 2 || program != 2)
+        return 0;
+    real_get_integerv(GL_ACTIVE_TEXTURE, &title_white_old_active);
+    active(GL_TEXTURE0);
+    real_get_integerv(GL_TEXTURE_BINDING_2D, &title_white_old_binding);
+    if (!title_white_tex)
+        gen(1, &title_white_tex);
+    if (!title_white_tex)
+        goto restore;
+    bind(GL_TEXTURE_2D, title_white_tex);
+    parami(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    parami(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    parami(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    parami(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    image(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+    fprintf(stderr, "GUA-TITLE-WHITE-TEX seq=%u old=%d diag=%u\\n",
+            seq, title_white_old_binding, title_white_tex);
+    title_white_tex_active = 1;
+    return 1;
+restore:
+    bind(GL_TEXTURE_2D, (uint32_t)title_white_old_binding);
+    active((uint32_t)title_white_old_active);
+    return 0;
+}
+
+static void title_white_texture_end(void)
+{
+    void (*bind)(uint32_t, uint32_t) = (void *)G.glBindTexture;
+    void (*active)(uint32_t) = (void *)G.glActiveTexture;
+    if (!title_white_tex_active || !bind || !active)
+        return;
+    active(GL_TEXTURE0);
+    bind(GL_TEXTURE_2D, (uint32_t)title_white_old_binding);
+    active((uint32_t)title_white_old_active);
+    title_white_tex_active = 0;
 }
 
 static void gl_title_full_probe(const char *stage, uint32_t fb,
@@ -1975,7 +2120,10 @@ static void present_swap(void)
     void (*blit)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
                  int32_t, uint32_t, uint32_t) = G.glBlitFramebuffer;
     int dw, dh, dx, dy;
+    int32_t old_source_read = 0;
     unsigned swap = ++pixel_swap_count;
+    uint32_t source_fbo = (present_last_fbo && gl_diag_last_draw_fb) ?
+                          gl_diag_last_draw_fb : game_fbo;
 
     if (!game_fbo) {
         present_draw_cursor(0, 0, win_w, win_h);
@@ -2033,17 +2181,29 @@ static void present_swap(void)
     if (scissor_on && G.glDisable)
         G.glDisable(GL_SCISSOR_TEST);
 
-    if (pixel_probe_swap(swap)) {
+    if (pixel_probe_swap(swap) ||
+        swap == (unsigned)present_hold_swap) {
         if (gl_diag_last_draw_fb)
             pixel_probe_target("app", gl_diag_last_draw_fb, game_w, game_h, swap);
         if (swap == 300 && gl_diag_last_draw_fb == 2)
             gl_title_full_probe("swap300", 2, game_w, game_h, swap);
+        if (swap == (unsigned)present_hold_swap && source_fbo != game_fbo)
+            gl_title_full_probe("hold-source", source_fbo, game_w, game_h, swap);
         pixel_probe_target("game", game_fbo, game_w, game_h, swap);
+        if (source_fbo != game_fbo)
+            pixel_probe_target("present-source", source_fbo, game_w, game_h, swap);
     }
 
     if (real_bind_fb) {
-        real_bind_fb(GL_READ_FRAMEBUFFER, game_fbo);
+        real_bind_fb(GL_READ_FRAMEBUFFER, source_fbo);
         real_bind_fb(GL_DRAW_FRAMEBUFFER, 0);
+    }
+    if (present_set_read_buffer && real_read_buffer) {
+        if (real_get_integerv)
+            real_get_integerv(GL_READ_BUFFER, &old_source_read);
+        real_read_buffer(GL_COLOR_ATTACHMENT0);
+        fprintf(stderr, "GUA-SWAP source-readbuf old=0x%x new=0x8ce0\\n",
+                (unsigned)old_source_read);
     }
     if (G.glViewport)
         G.glViewport(0, 0, win_w, win_h);
@@ -2051,18 +2211,27 @@ static void present_swap(void)
         int32_t actual_fb = 0;
         if (real_get_integerv)
             real_get_integerv(GL_FRAMEBUFFER_BINDING, &actual_fb);
-        fprintf(stderr, "GUA-SWAP swap=%u bound-fb=%d game-fbo=%u last-draw-fb=%u\\n",
-                swap, (int)actual_fb, game_fbo, gl_diag_last_draw_fb);
+        fprintf(stderr, "GUA-SWAP swap=%u bound-fb=%d game-fbo=%u last-draw-fb=%u source-fb=%u\\n",
+                swap, (int)actual_fb, game_fbo, gl_diag_last_draw_fb,
+                source_fbo);
     }
     if (blit)
         blit(0, 0, game_w, game_h, dx, dy, dx + dw, dy + dh,
              GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (present_set_read_buffer && real_read_buffer)
+        real_read_buffer((uint32_t)old_source_read);
     if (pixel_probe_swap(swap))
         pixel_probe_target("window", 0, win_w, win_h, swap);
+    if (swap == (unsigned)present_hold_swap && source_fbo != game_fbo)
+        gl_title_full_probe("window-held", 0, win_w, win_h, swap);
     if (swap_finish && G.glFinish)
         G.glFinish();
     present_draw_cursor(dx, dy, dw, dh);
     sdl.gl_swap(window);
+    if (present_hold_swap > 0 && swap == (unsigned)present_hold_swap) {
+        fprintf(stderr, "GUA-SWAP hold swap=%u seconds=5\\n", swap);
+        sleep(5);
+    }
     tspgl_stage_flip();
     input_soon = 1;
     if (real_bind_fb)
@@ -2215,11 +2384,15 @@ static int handle_client(int fd)
             op_ring_capture(h.seq, h.op, in, h.len);
         }
         title_occlusion_begin(h.op);
+        title_white_color_begin(h.op, h.seq);
+        title_white_texture_begin(h.op, h.seq);
         rc = tspgl_dispatch_simple(h.op, (const uint32_t *)dispatch_in,
                                    h.len, (uint32_t *)out, &out_n);
         if (rc != 0)
             rc = tspgl_dispatch_special(h.op, dispatch_in, h.len, out,
                                          &out_n);
+        title_white_texture_end();
+        title_white_color_end();
         title_occlusion_end(h.seq);
         if (h.op == OP_glGetError && out_n >= 4) {
             uint32_t err = 0;
@@ -2412,6 +2585,18 @@ int main(void)
         swap_interval = si ? atoi(si) : 0;
         if (swap_interval < 0)
             swap_interval = 0;
+    }
+    {
+        const char *plf = getenv("TSPGL_PRESENT_LAST_FBO");
+        present_last_fbo = plf && atoi(plf) != 0;
+    }
+    {
+        const char *prs = getenv("TSPGL_PRESENT_SET_READ_BUFFER");
+        present_set_read_buffer = prs && atoi(prs) != 0;
+    }
+    {
+        const char *phs = getenv("TSPGL_HOLD_SWAP");
+        present_hold_swap = phs ? atoi(phs) : 0;
     }
     {
         const char *mode = getenv("TSPGL_PRESENT");

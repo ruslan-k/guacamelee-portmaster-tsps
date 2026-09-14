@@ -22,6 +22,9 @@ static struct tspgl_shared *X;
 static int xport_diag = -1;
 static int real_glerror = -1;
 static unsigned diag_calls;
+static uint32_t recent_ops[16];
+static unsigned recent_ops_count;
+static unsigned recent_ops_pos;
 
 static int xport_diag_enabled(void)
 {
@@ -226,6 +229,11 @@ int tspgl_call(uint32_t op, const void *in, uint32_t in_len, void *out,
     if (!s)
         return -1;
     want_reply = tspgl_needs_reply(op);
+    if (xport_diag_enabled() && op != OP_glGetError) {
+        recent_ops[recent_ops_pos++ & 15u] = op;
+        if (recent_ops_count < 16)
+            recent_ops_count++;
+    }
     need = (uint32_t)sizeof(h) + in_len;
     if (want_reply && xport_diag_enabled() && diag_calls < 32) {
         diag_active = 1;
@@ -334,6 +342,19 @@ int tspgl_call(uint32_t op, const void *in, uint32_t in_len, void *out,
         }
         rc = r.op == TSPGL_OK ? 0 : -1;
         break;
+    }
+    if (op == OP_glGetError && xport_diag_enabled() && rc == 0 && out && out_cap >= 4) {
+        uint32_t error_value = 0;
+        unsigned i;
+        memcpy(&error_value, out, 4);
+        if (error_value != 0) {
+            fprintf(stderr, "GUA-XPORT glGetError value=0x%04x recent=", error_value);
+            for (i = 0; i < recent_ops_count; ++i) {
+                unsigned idx = (recent_ops_pos + 16u - recent_ops_count + i) & 15u;
+                fprintf(stderr, "%u%s", recent_ops[idx], i + 1 == recent_ops_count ? "" : ",");
+            }
+            fprintf(stderr, "\\n");
+        }
     }
     if (diag_active) {
         if (diag_get_integerv) {
