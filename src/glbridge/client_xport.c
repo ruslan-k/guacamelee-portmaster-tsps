@@ -20,6 +20,7 @@
 
 static struct tspgl_shared *X;
 static int xport_diag = -1;
+static int real_glerror = -1;
 static unsigned diag_calls;
 
 static int xport_diag_enabled(void)
@@ -31,6 +32,17 @@ static int xport_diag_enabled(void)
     v = getenv("GUACAMELEE_XPORT_DIAG");
     xport_diag = v && strcmp(v, "0") != 0;
     return xport_diag;
+}
+
+static int real_glerror_enabled(void)
+{
+    const char *v;
+
+    if (real_glerror >= 0)
+        return real_glerror;
+    v = getenv("GUACAMELEE_REAL_GLERROR");
+    real_glerror = v && strcmp(v, "0") != 0;
+    return real_glerror;
 }
 
 struct tspgl_shared *tspgl_shared(void)
@@ -204,7 +216,7 @@ int tspgl_call(uint32_t op, const void *in, uint32_t in_len, void *out,
     uint32_t diag_pname = 0;
     uint32_t need;
 
-    if (op == OP_glGetError) {
+    if (op == OP_glGetError && !real_glerror_enabled()) {
         if (out && out_cap >= 4)
             memset(out, 0, 4);
         return 0;

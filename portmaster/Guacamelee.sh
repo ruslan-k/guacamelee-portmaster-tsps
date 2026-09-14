@@ -96,7 +96,13 @@ if [ "$BRIDGE" -eq 1 ]; then
   export TSPGL_HEIGHT="$GUACAMELEE_HEIGHT"
   export TSPGL_PRESENT="${GUACAMELEE_PRESENT:-letterbox}"
   export GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-0}"
+  export GUACAMELEE_FBO_LIFECYCLE="${GUACAMELEE_FBO_LIFECYCLE:-0}"
   export GUACAMELEE_XPORT_DIAG="${GUACAMELEE_XPORT_DIAG:-0}"
+  export GUACAMELEE_DEPTH_ONLY_READ_NONE="${GUACAMELEE_DEPTH_ONLY_READ_NONE:-0}"
+  export GUACAMELEE_REAL_GLERROR="${GUACAMELEE_REAL_GLERROR:-0}"
+  export GUACAMELEE_ZERO_VIEWPORT="${GUACAMELEE_ZERO_VIEWPORT:-0}"
+  export TSPGL_DEPTH_ONLY_READ_NONE="$GUACAMELEE_DEPTH_ONLY_READ_NONE"
+  export TSPGL_ZERO_VIEWPORT="$GUACAMELEE_ZERO_VIEWPORT"
   rm -f /tmp/nfsmw.present.ready /tmp/tsp-glbridge.sock /tmp/tspgl-xport /tmp/nfsmw.frame
 
   (
@@ -153,6 +159,7 @@ if [ "$BRIDGE" -eq 1 ]; then
   export LIBGL_NOTEST="${GUACAMELEE_LIBGL_NOTEST:-1}"
 
   export LIBGL_SHRINK="${GUACAMELEE_LIBGL_SHRINK:-4}"
+  export LIBGL_FBOFORCETEX="${GUACAMELEE_LIBGL_FBOFORCETEX:-1}"
   export LIBGL_FB="${GUACAMELEE_LIBGL_FB:-1}"
   chmod 0755 "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin" "$LD"
 
@@ -160,7 +167,7 @@ if [ "$BRIDGE" -eq 1 ]; then
   echo "bridge_loader=$LD"
   echo "bridge_dimensions=${TSPGL_WIDTH}x${TSPGL_HEIGHT}"
   echo "box86_dynarec=$BOX86_DYNAREC bigblock=$BOX86_DYNAREC_BIGBLOCK log=$BOX86_LOG dlsym_error=$BOX86_DLSYM_ERROR dynarec_log=$BOX86_DYNAREC_LOG"
-  echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fb=$LIBGL_FB diag=$GUACAMELEE_GL_DIAG xport_diag=$GUACAMELEE_XPORT_DIAG"
+  echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fbotex=$LIBGL_FBOFORCETEX fb=$LIBGL_FB diag=$GUACAMELEE_GL_DIAG fbo_lifecycle=$GUACAMELEE_FBO_LIFECYCLE xport_diag=$GUACAMELEE_XPORT_DIAG depth_only_read_none=$GUACAMELEE_DEPTH_ONLY_READ_NONE real_glerror=$GUACAMELEE_REAL_GLERROR zero_viewport=$GUACAMELEE_ZERO_VIEWPORT"
   $GPTOKEYB2 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
   pm_platform_helper "$GAMEDIR/box86/box86"
   "$LD" --library-path "$LD_LIBRARY_PATH" "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin"

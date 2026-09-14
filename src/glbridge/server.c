@@ -23,6 +23,7 @@
 struct tspgl_api G;
 
 static int gl_diag = -1;
+static int gl_diag_lifecycle = -1;
 static unsigned gl_diag_ops;
 static int gl_diag_link;
 static int gl_diag_use;
@@ -38,6 +39,17 @@ static int gl_diag_enabled(void)
     v = getenv("GUACAMELEE_GL_DIAG");
     gl_diag = v && strcmp(v, "0") != 0;
     return gl_diag;
+}
+
+static int gl_diag_lifecycle_enabled(void)
+{
+    const char *v;
+
+    if (gl_diag_lifecycle >= 0)
+        return gl_diag_lifecycle && gl_diag_enabled();
+    v = getenv("GUACAMELEE_FBO_LIFECYCLE");
+    gl_diag_lifecycle = v && strcmp(v, "0") != 0;
+    return gl_diag_lifecycle && gl_diag_enabled();
 }
 
 static const char *gl_diag_op_name(uint32_t op)
@@ -153,6 +165,9 @@ static void gl_diag_fbo_result(uint32_t op, const uint8_t *out,
 #define GL_STENCIL_ATTACHMENT 0x8D20
 #define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
 #define GL_FRAMEBUFFER_BINDING 0x8CA6
+#define GL_RENDERBUFFER_BINDING 0x8CA7
+#define GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME 0x8CD1
+#define GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL 0x8CD2
 #define GL_READ_FRAMEBUFFER 0x8CA8
 #define GL_DRAW_FRAMEBUFFER 0x8CA9
 #define GL_COLOR_BUFFER_BIT 0x4000
@@ -248,6 +263,11 @@ static void (*real_bind_fb)(uint32_t, uint32_t);
 static void (*real_get_integerv)(uint32_t, int32_t *);
 static uint32_t (*real_check_fb)(uint32_t);
 static void (*real_draw_buffers)(int32_t, const uint32_t *);
+static void (*real_read_buffer)(uint32_t);
+static int depth_only_read_none;
+static int zero_viewport;
+static unsigned gl_diag_lifecycle_ops;
+static uint32_t gl_diag_last_draw_fb;
 static void (*real_tex_image)(uint32_t, int32_t, int32_t, int32_t, int32_t,
                               int32_t, uint32_t, uint32_t, const void *);
 static void (*real_tex_parami)(uint32_t, uint32_t, int32_t);
@@ -555,10 +575,14 @@ static int create_game_fbo(void)
 
 static uint32_t wrap_check_fb(uint32_t target)
 {
+    static unsigned wrap_diag;
     uint32_t st;
     if (!real_check_fb)
         return 0;
     st = real_check_fb(target);
+    if (gl_diag_enabled() && wrap_diag < 32)
+        fprintf(stderr, "GUA-FBO wrap-check#%u target=0x%x initial=0x%x\\n",
+                wrap_diag++, target, st);
     if (st == GL_FRAMEBUFFER_COMPLETE)
         return st;
     if (real_draw_buffers) {
@@ -574,11 +598,20 @@ static uint32_t wrap_check_fb(uint32_t target)
         if (get_att) {
             get_att(target, GL_COLOR_ATTACHMENT0,
                     GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &color_type);
+            if (gl_diag_enabled() && wrap_diag < 32)
+                fprintf(stderr,
+                        "GUA-FBO wrap-color-type=0x%x target=0x%x\\n",
+                        (unsigned)color_type, target);
             if (color_type != (int32_t)GL_NONE)
                 return st;
         }
+        if (depth_only_read_none && real_read_buffer)
+            real_read_buffer(GL_NONE);
         real_draw_buffers(1, &none);
         st = real_check_fb(target);
+        if (gl_diag_enabled() && wrap_diag < 32)
+            fprintf(stderr, "GUA-FBO wrap-after-none=0x%x target=0x%x\\n",
+                    st, target);
         if (st == GL_FRAMEBUFFER_COMPLETE) {
             static int once;
             if (!once) {
@@ -588,10 +621,79 @@ static uint32_t wrap_check_fb(uint32_t target)
             }
             return st;
         }
+        if (depth_only_read_none && real_read_buffer)
+            real_read_buffer(GL_COLOR_ATTACHMENT0);
         real_draw_buffers(1, &color);
         st = real_check_fb(target);
     }
     return st;
+}
+
+static void gl_diag_fbo_lifecycle(uint32_t op, const uint8_t *in,
+                                  uint32_t len)
+{
+    uint32_t u[5] = {0, 0, 0, 0, 0};
+    int32_t fb = 0, rb = 0, vp[4] = {0, 0, 0, 0};
+    unsigned i, n;
+
+    if (!gl_diag_lifecycle_enabled() || gl_diag_lifecycle_ops >= 2000 ||
+        (!gl_diag_is_fbo_op(op) && op != OP_glDrawArrays &&
+         op != OP_glDrawElements))
+        return;
+    n = len / 4u;
+    if (n > 5)
+        n = 5;
+    for (i = 0; i < n; ++i)
+        memcpy(&u[i], in + i * 4u, 4);
+    if (real_get_integerv) {
+        real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+        real_get_integerv(GL_RENDERBUFFER_BINDING, &rb);
+    }
+    if (op == OP_glBindFramebuffer) {
+        fprintf(stderr, "GUA-FBO bind-fb requested=%u actual=%d\\n",
+                u[1], (int)fb);
+    } else if (op == OP_glBindRenderbuffer) {
+        fprintf(stderr, "GUA-FBO bind-rb requested=%u actual=%d\\n",
+                u[1], (int)rb);
+    } else if (op == OP_glRenderbufferStorage && G.glGetRenderbufferParameteriv) {
+        int32_t w = 0, h = 0, fmt = 0;
+        void (*get_rb)(uint32_t, uint32_t, int32_t *) =
+            (void *)G.glGetRenderbufferParameteriv;
+        get_rb(GL_RENDERBUFFER, 0x8D42, &w);
+        get_rb(GL_RENDERBUFFER, 0x8D43, &h);
+        get_rb(GL_RENDERBUFFER, 0x8D44, &fmt);
+        fprintf(stderr,
+                "GUA-FBO rb-state fb=%d rb=%d fmt=0x%x requested=%dx%d actual=%dx%d internal=0x%x\\n",
+                (int)fb, (int)rb, u[1], (int32_t)u[2], (int32_t)u[3],
+                (int)w, (int)h, (unsigned)fmt);
+    } else if (op == OP_glFramebufferRenderbuffer ||
+               op == OP_glFramebufferTexture2D) {
+        int32_t type = 0, name = 0, level = 0;
+        void (*get_att)(uint32_t, uint32_t, uint32_t, int32_t *) =
+            (void *)G.glGetFramebufferAttachmentParameteriv;
+        if (get_att) {
+            get_att(GL_FRAMEBUFFER, u[1], GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                    &type);
+            get_att(GL_FRAMEBUFFER, u[1], GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+                    &name);
+            get_att(GL_FRAMEBUFFER, u[1], GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL,
+                    &level);
+        }
+        fprintf(stderr,
+                "GUA-FBO attachment fb=%d slot=0x%x type=0x%x name=%d level=%d\\n",
+                (int)fb, u[1], (unsigned)type, (int)name, (int)level);
+    } else if (op == OP_glCheckFramebufferStatus && real_check_fb) {
+        fprintf(stderr, "GUA-FBO status fb=%d status=0x%x\\n", (int)fb,
+                real_check_fb(GL_FRAMEBUFFER));
+    } else if (op == OP_glDrawArrays || op == OP_glDrawElements) {
+        if (real_get_integerv)
+            real_get_integerv(GL_VIEWPORT, vp);
+        gl_diag_last_draw_fb = (uint32_t)fb;
+        fprintf(stderr, "GUA-DRAW fb=%d program=? viewport=%d,%d,%d,%d op=%s\\n",
+                (int)fb, vp[0], vp[1], vp[2], vp[3],
+                op == OP_glDrawArrays ? "DrawArrays" : "DrawElements");
+    }
+    gl_diag_lifecycle_ops++;
 }
 
 static void wrap_bind_fb(uint32_t target, uint32_t fb)
@@ -1102,9 +1204,16 @@ static void present_swap(void)
     }
     if (G.glViewport)
         G.glViewport(0, 0, win_w, win_h);
+    if (gl_diag_lifecycle_enabled()) {
+        int32_t actual_fb = 0;
+        if (real_get_integerv)
+            real_get_integerv(GL_FRAMEBUFFER_BINDING, &actual_fb);
+        fprintf(stderr, "GUA-SWAP bound-fb=%d game-fbo=%u last-draw-fb=%u\\n",
+                (int)actual_fb, game_fbo, gl_diag_last_draw_fb);
+    }
     if (blit)
-        blit(0, 0, game_w, game_h, dx, dy, dx + dw, dy + dh, GL_COLOR_BUFFER_BIT,
-             GL_NEAREST);
+        blit(0, 0, game_w, game_h, dx, dy, dx + dw, dy + dh,
+             GL_COLOR_BUFFER_BIT, GL_NEAREST);
     present_draw_cursor(dx, dy, dw, dh);
     sdl.gl_swap(window);
     tspgl_stage_flip();
@@ -1225,12 +1334,28 @@ static int handle_client(int fd)
         present_swap();
         rc = 0;
     } else {
+        const uint8_t *dispatch_in = in;
+        uint8_t vp_in[16];
         gl_diag_fbo_call(h.op, in, h.len);
-        rc = tspgl_dispatch_simple(h.op, (const uint32_t *)in, h.len,
-                                   (uint32_t *)out, &out_n);
+        if (zero_viewport && h.op == OP_glViewport && h.len == sizeof(vp_in)) {
+            uint32_t *u;
+            memcpy(vp_in, in, sizeof(vp_in));
+            u = (uint32_t *)vp_in;
+            if (u[2] == 0 && u[3] == 0) {
+                u[2] = (uint32_t)game_w;
+                u[3] = (uint32_t)game_h;
+                dispatch_in = vp_in;
+                fprintf(stderr, "GUA-FBO zero-viewport override %dx%d\\n",
+                        game_w, game_h);
+            }
+        }
+        rc = tspgl_dispatch_simple(h.op, (const uint32_t *)dispatch_in,
+                                   h.len, (uint32_t *)out, &out_n);
         if (rc != 0)
-            rc = tspgl_dispatch_special(h.op, in, h.len, out, &out_n);
+            rc = tspgl_dispatch_special(h.op, dispatch_in, h.len, out,
+                                         &out_n);
         gl_diag_fbo_result(h.op, out, out_n, rc);
+        gl_diag_fbo_lifecycle(h.op, in, h.len);
         if (h.op == OP_glFinish)
             tspgl_stage_flip();
         if (rc != 0) {
@@ -1363,6 +1488,14 @@ int main(void)
         game_w = 1024;
     if (game_h < 1)
         game_h = 768;
+    {
+        const char *rd = getenv("TSPGL_DEPTH_ONLY_READ_NONE");
+        depth_only_read_none = rd && atoi(rd) != 0;
+    }
+    {
+        const char *zv = getenv("TSPGL_ZERO_VIEWPORT");
+        zero_viewport = zv && atoi(zv) != 0;
+    }
     {
         const char *mode = getenv("TSPGL_PRESENT");
 #ifdef TSPGL_DEFAULT_LETTERBOX
@@ -1513,6 +1646,7 @@ int main(void)
     G.glCheckFramebufferStatus = wrap_check_fb;
     real_draw_buffers = (void (*)(int32_t, const uint32_t *))(uintptr_t)gl_get(
         "glDrawBuffers");
+    real_read_buffer = (void (*)(uint32_t))(uintptr_t)gl_get("glReadBuffer");
     real_tex_image = (void *)G.glTexImage2D;
     if (real_tex_image)
         G.glTexImage2D = (void *)(uintptr_t)wrap_tex_image2d;

@@ -86,6 +86,16 @@ def main() -> int:
     assert 'GUA-GL op#' in server_main_source
     assert 'GUA-FBO call' in server_main_source
     assert 'GUA-FBO result' in server_main_source
+    assert 'GUA-FBO wrap-check' in server_main_source
+    assert 'GUA-FBO rb-state' in server_main_source
+    assert 'GUA-DRAW' in server_main_source
+    assert 'GUA-SWAP bound-fb' in server_main_source
+    assert 'GUACAMELEE_FBO_LIFECYCLE="${GUACAMELEE_FBO_LIFECYCLE:-0}"' in launcher_source
+    assert 'LIBGL_FBOFORCETEX="${GUACAMELEE_LIBGL_FBOFORCETEX:-1}"' in launcher_source
+    assert 'GUACAMELEE_REAL_GLERROR="${GUACAMELEE_REAL_GLERROR:-0}"' in launcher_source
+    assert 'GUACAMELEE_ZERO_VIEWPORT="${GUACAMELEE_ZERO_VIEWPORT:-0}"' in launcher_source
+    assert 'TSPGL_DEPTH_ONLY_READ_NONE' in server_main_source
+    assert 'GUACAMELEE_DEPTH_ONLY_READ_NONE="${GUACAMELEE_DEPTH_ONLY_READ_NONE:-0}"' in launcher_source
     assert 'GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-0}"' in launcher_source
     assert 'GUACAMELEE_WIDTH:-1024' in launcher_source
     assert 'GUACAMELEE_HEIGHT:-768' in launcher_source
