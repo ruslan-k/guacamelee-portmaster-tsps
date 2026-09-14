@@ -88,6 +88,7 @@ static int gl_diag_is_fbo_op(uint32_t op)
     case OP_glCheckFramebufferStatus:
     case OP_glFramebufferRenderbuffer:
     case OP_glFramebufferTexture2D:
+    case OP_glCopyTexImage2D:
     case OP_glRenderbufferStorage:
     case OP_glGenFramebuffers:
     case OP_glGenRenderbuffers:
@@ -253,6 +254,11 @@ static int listen_fd = -1;
 
 int game_w = 1024;
 int game_h = 768;
+static int rb_zero_size;
+static int fbo_texture_fallback;
+static int unify_depth_stencil;
+static int rb_format_fix;
+static uint32_t depth_stencil_rb;
 int win_w = 1280;
 int win_h = 720;
 static int present_letterbox;
@@ -655,6 +661,15 @@ static void gl_diag_fbo_lifecycle(uint32_t op, const uint8_t *in,
     } else if (op == OP_glBindRenderbuffer) {
         fprintf(stderr, "GUA-FBO bind-rb requested=%u actual=%d\\n",
                 u[1], (int)rb);
+    } else if (op == OP_glCopyTexImage2D && real_get_integerv) {
+        int32_t tex = 0;
+        real_get_integerv(GL_TEXTURE_BINDING_2D, &tex);
+        fprintf(stderr,
+                "GUA-TEX copy fb=%d tex=%d target=0x%x level=%d "
+                "ifmt=0x%x xy=%d,%d size=%dx%d border=%d\\n",
+                (int)fb, (int)tex, u[0], (int32_t)u[1], u[2],
+                (int32_t)u[3], (int32_t)u[4], (int32_t)u[5],
+                (int32_t)u[6], (int32_t)u[7]);
     } else if (op == OP_glRenderbufferStorage && G.glGetRenderbufferParameteriv) {
         int32_t w = 0, h = 0, fmt = 0;
         void (*get_rb)(uint32_t, uint32_t, int32_t *) =
@@ -797,6 +812,19 @@ static void wrap_tex_image2d(uint32_t target, int32_t level, int32_t ifmt,
 
     if (real_tex_image)
         real_tex_image(target, level, ifmt, w, h, border, format, type, pixels);
+    if (gl_diag_lifecycle_enabled() && level == 0) {
+        static unsigned tex_diag;
+        int32_t fb = 0;
+        if (real_get_integerv)
+            real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+        if (tex_diag < 256)
+            fprintf(stderr,
+                    "GUA-TEX image#%u fb=%d tex=%u target=0x%x "
+                    "level=%d requested=%dx%d ifmt=0x%x format=0x%x type=0x%x\\n",
+                    tex_diag++, (int)fb, bound_tex(param_target(target)), target,
+                    (int)level, (int)w, (int)h, (unsigned)ifmt,
+                    (unsigned)format, (unsigned)type);
+    }
     if (is_depth_internal(ifmt) && real_tex_parami)
         real_tex_parami(ptarget, GL_TEXTURE_COMPARE_MODE, (int32_t)GL_NONE);
     if (level != 0)
@@ -1495,6 +1523,22 @@ int main(void)
     {
         const char *zv = getenv("TSPGL_ZERO_VIEWPORT");
         zero_viewport = zv && atoi(zv) != 0;
+    }
+    {
+        const char *rz = getenv("TSPGL_RB_ZERO_SIZE");
+        rb_zero_size = rz && atoi(rz) != 0;
+    }
+    {
+        const char *ft = getenv("TSPGL_FBO_TEXTURE_FALLBACK");
+        fbo_texture_fallback = ft && atoi(ft) != 0;
+    }
+    {
+        const char *ud = getenv("TSPGL_UNIFY_DEPTH_STENCIL");
+        unify_depth_stencil = ud && atoi(ud) != 0;
+    }
+    {
+        const char *rf = getenv("TSPGL_RB_FORMAT_FIX");
+        rb_format_fix = rf && atoi(rf) != 0;
     }
     {
         const char *mode = getenv("TSPGL_PRESENT");

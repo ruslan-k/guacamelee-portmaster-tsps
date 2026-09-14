@@ -7,6 +7,7 @@ DIST="$PORT/dist"
 ZIG=${ZIG:-zig}
 mkdir -p "$DIST"
 ZIG="$ZIG" bash "$ROOT/tools/build_tsps_bridge.sh"
+ZIG="$ZIG" bash "$ROOT/tools/build_hardext_fix.sh"
 chmod 0755 "$PORT/Guacamelee.sh" "$PORT/guacamelee/setup.sh"
 rm -f "$DIST/guacamelee.zip"
 cd "$PORT"

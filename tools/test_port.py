@@ -27,6 +27,7 @@ def main() -> int:
         ROOT / "portmaster" / "Guacamelee.sh",
         PORT / "setup.sh",
         ROOT / "tools" / "build_tsps_bridge.sh",
+        ROOT / "tools" / "build_hardext_fix.sh",
         ROOT / "tools" / "build_port.sh",
     ]:
         run("bash", "-n", str(script))
@@ -35,6 +36,7 @@ def main() -> int:
         PORT / "box86" / "box86",
         PORT / "box86" / "native" / "libSDL2-2.0.so.0",
         PORT / "gl4es" / "libGL.so.1",
+        PORT / "compat" / "libgua_hardext_fix.so",
         PORT / "guacamelee_present",
         PORT / "armhf" / "lib" / "ld-linux-armhf.so.3",
         PORT / "glbridge" / "libEGL.so.1",
@@ -88,12 +90,32 @@ def main() -> int:
     assert 'GUA-FBO result' in server_main_source
     assert 'GUA-FBO wrap-check' in server_main_source
     assert 'GUA-FBO rb-state' in server_main_source
+    assert 'GUA-TEX image#' in server_main_source
+    assert 'GUA-TEX copy' in server_main_source
     assert 'GUA-DRAW' in server_main_source
     assert 'GUA-SWAP bound-fb' in server_main_source
     assert 'GUACAMELEE_FBO_LIFECYCLE="${GUACAMELEE_FBO_LIFECYCLE:-0}"' in launcher_source
     assert 'LIBGL_FBOFORCETEX="${GUACAMELEE_LIBGL_FBOFORCETEX:-1}"' in launcher_source
     assert 'GUACAMELEE_REAL_GLERROR="${GUACAMELEE_REAL_GLERROR:-0}"' in launcher_source
     assert 'GUACAMELEE_ZERO_VIEWPORT="${GUACAMELEE_ZERO_VIEWPORT:-0}"' in launcher_source
+    assert 'GUACAMELEE_HARDEXT_FIX="${GUACAMELEE_HARDEXT_FIX:-0}"' in launcher_source
+    assert 'GUACAMELEE_RB_ZERO_SIZE="${GUACAMELEE_RB_ZERO_SIZE:-0}"' in launcher_source
+    assert 'GUACAMELEE_FBO_TEXTURE_FALLBACK="${GUACAMELEE_FBO_TEXTURE_FALLBACK:-0}"' in launcher_source
+    assert 'GUACAMELEE_UNIFY_DEPTH_STENCIL="${GUACAMELEE_UNIFY_DEPTH_STENCIL:-0}"' in launcher_source
+    assert 'GUACAMELEE_RB_FORMAT_FIX="${GUACAMELEE_RB_FORMAT_FIX:-0}"' in launcher_source
+    assert 'TSPGL_RB_ZERO_SIZE' in server_main_source
+    assert 'TSPGL_RB_FORMAT_FIX' in server_main_source
+    assert 'TSPGL_FBO_TEXTURE_FALLBACK' in server_main_source
+    assert 'TSPGL_UNIFY_DEPTH_STENCIL' in server_main_source
+    assert 'GUA-FBO texture fallback' in (ROOT / "src" / "glbridge" / "server_gen.c").read_text()
+    assert 'GUA-FBO zero-rb override' in server_main_source or 'GUA-FBO zero-rb override' in (ROOT / "src" / "glbridge" / "server_gen.c").read_text()
+    assert 'LD_PRELOAD="$HARDEXT_FIX"' in launcher_source
+    assert 'env -u LD_PRELOAD' in launcher_source
+    assert 'GUACAMELEE_GL4ES_PATH="$GAMEDIR/gl4es/libGL.so.1"' in launcher_source
+    assert 'RTLD_NOLOAD' in (ROOT / "compat" / "hardext_fix.c").read_text()
+    assert 'GUA-HARDEXT' in (ROOT / "compat" / "hardext_fix.c").read_text()
+    assert 'frontend rb-storage' in (ROOT / "compat" / "hardext_fix.c").read_text()
+    assert 'frontend fb-rb' in (ROOT / "compat" / "hardext_fix.c").read_text()
     assert 'TSPGL_DEPTH_ONLY_READ_NONE' in server_main_source
     assert 'GUACAMELEE_DEPTH_ONLY_READ_NONE="${GUACAMELEE_DEPTH_ONLY_READ_NONE:-0}"' in launcher_source
     assert 'GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-0}"' in launcher_source
