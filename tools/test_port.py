@@ -115,6 +115,7 @@ def main() -> int:
     assert 'GUACAMELEE_TITLE_OCCLUSION_DIAG="${GUACAMELEE_TITLE_OCCLUSION_DIAG:-0}"' in launcher_source
     assert 'GUACAMELEE_FBO_CENSUS="${GUACAMELEE_FBO_CENSUS:-0}"' in launcher_source
     assert 'GUACAMELEE_FBO_TRANSITION_TRACE="${GUACAMELEE_FBO_TRANSITION_TRACE:-0}"' in launcher_source
+    assert 'GUACAMELEE_FBO_TRANSITION_MIN_SWAP="${GUACAMELEE_FBO_TRANSITION_MIN_SWAP:-100}"' in launcher_source
     assert 'TSPGL_PRESENT_LAST_FBO="${GUACAMELEE_PRESENT_LAST_FBO:-0}"' in launcher_source
     assert 'TSPGL_PRESENT_SET_READ_BUFFER="${GUACAMELEE_PRESENT_SET_READ_BUFFER:-0}"' in launcher_source
     assert 'TSPGL_HOLD_SWAP="${GUACAMELEE_HOLD_SWAP:-0}"' in launcher_source
