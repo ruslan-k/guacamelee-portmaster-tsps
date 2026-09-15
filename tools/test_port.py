@@ -78,9 +78,10 @@ def main() -> int:
     assert 'eglQuerySurface' in source
     assert "src[total++] = '\\n';" in server_source
     assert 'strip_img_ubo' in server_source
-    assert 'INPUT_HELPER="$GPTOKEYB2"' in launcher_source
-    assert 'INPUT_HELPER="$GPTOKEYB"' in launcher_source
-    assert 'GUACAMELEE_LEGACY_INPUT' in launcher_source
+    assert 'GUACAMELEE_INPUT_MODE' in launcher_source
+    assert 'input_mode=xbox360' in launcher_source
+    assert '"game-bin" -x' in launcher_source
+    assert 'input_mode=keyboard' in launcher_source
 
     # The bundled gl4es hardware probe intentionally submits desktop GLSL 120
     # shaders with IMG-specific layout qualifiers. Through the 32->64 proxy we
