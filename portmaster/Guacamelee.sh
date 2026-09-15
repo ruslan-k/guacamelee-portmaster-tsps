@@ -76,7 +76,13 @@ case "${GUACAMELEE_TSPS_BRIDGE:-auto}" in
 esac
 
 PRES=0
+INPUT_PID=0
 cleanup() {
+  if [ "$INPUT_PID" -ne 0 ]; then
+    kill "$INPUT_PID" 2>/dev/null || true
+    wait "$INPUT_PID" 2>/dev/null || true
+    INPUT_PID=0
+  fi
   if [ "$PRES" -ne 0 ]; then
     kill "$PRES" 2>/dev/null || true
     wait "$PRES" 2>/dev/null || true
@@ -228,10 +234,9 @@ if [ "$BRIDGE" -eq 1 ]; then
   echo "bridge_dimensions=${TSPGL_WIDTH}x${TSPGL_HEIGHT}"
   echo "box86_dynarec=$BOX86_DYNAREC bigblock=$BOX86_DYNAREC_BIGBLOCK log=$BOX86_LOG dlsym_error=$BOX86_DLSYM_ERROR dynarec_log=$BOX86_DYNAREC_LOG"
   echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fbotex=$LIBGL_FBOFORCETEX fb=$LIBGL_FB diag=$GUACAMELEE_GL_DIAG fbo_lifecycle=$GUACAMELEE_FBO_LIFECYCLE xport_diag=$GUACAMELEE_XPORT_DIAG depth_only_read_none=$GUACAMELEE_DEPTH_ONLY_READ_NONE real_glerror=$GUACAMELEE_REAL_GLERROR khr_debug=$GUACAMELEE_KHR_DEBUG op_ring=$GUACAMELEE_OP_RING pixel_probe=$GUACAMELEE_PIXEL_PROBE zero_viewport=$GUACAMELEE_ZERO_VIEWPORT rb_zero_size=$GUACAMELEE_RB_ZERO_SIZE fbo_texture_fallback=$GUACAMELEE_FBO_TEXTURE_FALLBACK unify_depth_stencil=$GUACAMELEE_UNIFY_DEPTH_STENCIL rb_format_fix=$GUACAMELEE_RB_FORMAT_FIX frontend_rb_size_fix=$GUACAMELEE_FRONTEND_RB_SIZE_FIX hardext_fix=$GUACAMELEE_HARDEXT_FIX"
-  INPUT_HELPER="${GUACAMELEE_GPTOKEYB:-/mnt/SDCARD/spruce/bin64/gptokeyb}"
-  echo "input_mode=gptokeyb_ini helper=$INPUT_HELPER"
-  [ -x "$INPUT_HELPER" ] || { echo "gptokeyb helper missing" >&2; exit 2; }
-  "$INPUT_HELPER" -1 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
+  echo "input_mode=guest_evdev shim=$GAMEDIR/compat/libgua_evdev_input.so"
+  [ -f "$GAMEDIR/compat/libgua_evdev_input.so" ] || { echo "guest evdev shim missing" >&2; exit 2; }
+  export BOX86_LD_PRELOAD="$GAMEDIR/compat/libgua_sdl_mode_fix.so:$GAMEDIR/compat/libgua_evdev_input.so${BOX86_LD_PRELOAD:+:$BOX86_LD_PRELOAD}"
   pm_platform_helper "$GAMEDIR/box86/box86"
   if [ "$GUACAMELEE_HARDEXT_FIX" != "0" ]; then
     if [ "${GUACAMELEE_STRACE:-0}" != "0" ] && command -v strace >/dev/null 2>&1; then
@@ -254,10 +259,9 @@ else
   export BOX86_LD_LIBRARY_PATH="$GAMEDIR/box86/x86:$GAMEDIR/gamedata/lib32:$GAMEDIR/libs/x86"
   export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es/libGL.so.1"
   export LIBGL_SHRINK=4
-  INPUT_HELPER="${GUACAMELEE_GPTOKEYB:-/mnt/SDCARD/spruce/bin64/gptokeyb}"
-  echo "input_mode=gptokeyb_ini helper=$INPUT_HELPER"
-  [ -x "$INPUT_HELPER" ] || { echo "gptokeyb helper missing" >&2; exit 2; }
-  "$INPUT_HELPER" -1 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
+  echo "input_mode=guest_evdev shim=$GAMEDIR/compat/libgua_evdev_input.so"
+  [ -f "$GAMEDIR/compat/libgua_evdev_input.so" ] || { echo "guest evdev shim missing" >&2; exit 2; }
+  export BOX86_LD_PRELOAD="$GAMEDIR/compat/libgua_sdl_mode_fix.so:$GAMEDIR/compat/libgua_evdev_input.so${BOX86_LD_PRELOAD:+:$BOX86_LD_PRELOAD}"
   pm_platform_helper "$GAMEDIR/box86/box86"
   "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin"
   result=$?
