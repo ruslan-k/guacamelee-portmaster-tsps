@@ -19,6 +19,45 @@
 #define XPORT_MAGIC 0x58504f52u
 
 static struct tspgl_shared *X;
+static int xport_diag = -1;
+static int real_glerror = -1;
+static unsigned diag_calls;
+static uint32_t recent_ops[16];
+static unsigned recent_ops_count;
+static unsigned recent_ops_pos;
+
+static int xport_diag_enabled(void)
+{
+    const char *v;
+
+    if (xport_diag >= 0)
+        return xport_diag;
+    v = getenv("GUACAMELEE_XPORT_DIAG");
+    xport_diag = v && strcmp(v, "0") != 0;
+    return xport_diag;
+}
+
+static int env_dim(const char *name, int fallback)
+{
+    const char *v = getenv(name);
+    char *end = NULL;
+    long n;
+    if (!v || !*v) return fallback;
+    n = strtol(v, &end, 10);
+    if (!end || *end || n <= 0 || n > 8192) return fallback;
+    return (int)n;
+}
+
+static int real_glerror_enabled(void)
+{
+    const char *v;
+
+    if (real_glerror >= 0)
+        return real_glerror;
+    v = getenv("GUACAMELEE_REAL_GLERROR");
+    real_glerror = v && strcmp(v, "0") != 0;
+    return real_glerror;
+}
 
 struct tspgl_shared *tspgl_shared(void)
 {
@@ -49,10 +88,20 @@ struct tspgl_shared *tspgl_shared(void)
                 X->sock = -1;
                 X->pid = pid;
                 X->unpack_align = 4;
-                X->st_viewport[2] = 640;
-                X->st_viewport[3] = 480;
-                X->st_scissor[2] = 640;
-                X->st_scissor[3] = 480;
+                {
+                    int w = env_dim("TSPGL_WIDTH", 1024);
+                    int h = env_dim("TSPGL_HEIGHT", 768);
+                    X->st_viewport[0] = 0;
+                    X->st_viewport[1] = 0;
+                    X->st_viewport[2] = w;
+                    X->st_viewport[3] = h;
+                    X->st_scissor[0] = 0;
+                    X->st_scissor[1] = 0;
+                    X->st_scissor[2] = w;
+                    X->st_scissor[3] = h;
+                    if (xport_diag_enabled())
+                        fprintf(stderr, "GUA-GEOM shadow-init viewport=0,0,%d,%d scissor=0,0,%d,%d\\n", w, h, w, h);
+                }
                 X->magic = XPORT_MAGIC;
                 fprintf(stderr, "tspgl: shared xport pid=%d\n", (int)pid);
             }
@@ -181,13 +230,17 @@ int tspgl_call(uint32_t op, const void *in, uint32_t in_len, void *out,
     static uint8_t scratch_s[2 * 1024 * 1024];
     uint8_t *scratch = scratch_s;
     uint8_t *scratch_h = NULL;
-    uint32_t seq;
+    uint32_t seq = 0;
     int attempt;
     int rc = -1;
     int want_reply;
+    int diag_active = 0;
+    int diag_get_integerv = 0;
+    int reply_read;
+    uint32_t diag_pname = 0;
     uint32_t need;
 
-    if (op == OP_glGetError) {
+    if (op == OP_glGetError && !real_glerror_enabled()) {
         if (out && out_cap >= 4)
             memset(out, 0, 4);
         return 0;
@@ -197,8 +250,28 @@ int tspgl_call(uint32_t op, const void *in, uint32_t in_len, void *out,
     if (!s)
         return -1;
     want_reply = tspgl_needs_reply(op);
+    if (xport_diag_enabled() && op != OP_glGetError) {
+        recent_ops[recent_ops_pos++ & 15u] = op;
+        if (recent_ops_count < 16)
+            recent_ops_count++;
+    }
     need = (uint32_t)sizeof(h) + in_len;
+    if (want_reply && xport_diag_enabled() && diag_calls < 32) {
+        diag_active = 1;
+        diag_calls++;
+        if (op == OP_glGetIntegerv && in && in_len >= 4) {
+            memcpy(&diag_pname, in, 4);
+            diag_get_integerv = 1;
+            fprintf(stderr, "GUA-XPORT glGetIntegerv begin pname=0x%08x\n",
+                    diag_pname);
+        }
+        fprintf(stderr,
+                "GUA-XPORT enter op=%u seq=%u in_len=%u\n",
+                op, s->seq + 1u, in_len);
+    }
     tspgl_lock();
+    if (diag_active)
+        fprintf(stderr, "GUA-XPORT lock-acquired op=%u\n", op);
     for (attempt = 0; attempt < 2; ++attempt) {
         if (tspgl_connect() != 0)
             break;
@@ -246,12 +319,19 @@ int tspgl_call(uint32_t op, const void *in, uint32_t in_len, void *out,
             tspgl_disconnect();
             continue;
         }
+        if (diag_active)
+            fprintf(stderr, "GUA-XPORT sent op=%u seq=%u\n", op, seq);
         if (!want_reply) {
             rc = 0;
             break;
         }
-        if (full_read(s->sock, &r, sizeof(r)) != 0 ||
-            r.magic != TSPGL_MAGIC || r.seq != seq || r.len > TSPGL_MAX_BLOB) {
+        reply_read = full_read(s->sock, &r, sizeof(r));
+        if (reply_read == 0 && diag_active)
+            fprintf(stderr,
+                    "GUA-XPORT reply-hdr op=%u seq=%u status=%u len=%u\n",
+                    op, r.seq, r.op, r.len);
+        if (reply_read != 0 || r.magic != TSPGL_MAGIC || r.seq != seq ||
+            r.len > TSPGL_MAX_BLOB) {
             if (s->fail_log < 64) {
                 fprintf(stderr, "tspgl: reply op=%u retry=%d errno=%d\n", op,
                         attempt, errno);
@@ -283,6 +363,31 @@ int tspgl_call(uint32_t op, const void *in, uint32_t in_len, void *out,
         }
         rc = r.op == TSPGL_OK ? 0 : -1;
         break;
+    }
+    if (op == OP_glGetError && xport_diag_enabled() && rc == 0 && out && out_cap >= 4) {
+        uint32_t error_value = 0;
+        unsigned i;
+        memcpy(&error_value, out, 4);
+        if (error_value != 0) {
+            fprintf(stderr, "GUA-XPORT glGetError value=0x%04x recent=", error_value);
+            for (i = 0; i < recent_ops_count; ++i) {
+                unsigned idx = (recent_ops_pos + 16u - recent_ops_count + i) & 15u;
+                fprintf(stderr, "%u%s", recent_ops[idx], i + 1 == recent_ops_count ? "" : ",");
+            }
+            fprintf(stderr, "\\n");
+        }
+    }
+    if (diag_active) {
+        if (diag_get_integerv) {
+            int32_t value = 0;
+
+            if (rc == 0 && out && out_cap >= 4)
+                memcpy(&value, out, 4);
+            fprintf(stderr,
+                    "GUA-XPORT glGetIntegerv end pname=0x%08x value=0x%08x rc=%d\n",
+                    diag_pname, (uint32_t)value, rc);
+        }
+        fprintf(stderr, "GUA-XPORT end op=%u seq=%u rc=%d\n", op, seq, rc);
     }
     free(scratch_h);
     tspgl_unlock();

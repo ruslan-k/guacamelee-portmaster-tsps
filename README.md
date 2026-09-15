@@ -48,13 +48,13 @@ The launcher selects the bridge automatically on Smart Pro S / SpruceOS. For con
 ```text
 GUACAMELEE_TSPS_BRIDGE=1     force the bridge
 GUACAMELEE_TSPS_BRIDGE=0     use the original direct GLES path
-GUACAMELEE_WIDTH=640         guest surface width, default 640
-GUACAMELEE_HEIGHT=480        guest surface height, default 480
+GUACAMELEE_WIDTH=1024        guest surface width, default 1024
+GUACAMELEE_HEIGHT=768        guest surface height, default 768
 GUACAMELEE_PRESENT=letterbox presenter scaling
 GUACAMELEE_LIBGL_SHRINK=4    gl4es texture reduction
 ```
 
-Initial bring-up intentionally uses a 640x480 game surface letterboxed onto the 1280x720 TSPS panel. A clean process exit is not functional proof. Device validation must cover presenter readiness, actual frames, controls, audio, saves, exit, and return to PortMaster.
+The production default is a 1024x768 game surface letterboxed onto the 1280x720 TSPS panel. This matches the SDL drawable requested by the GOG build; the former 640x480 surface cropped and shifted the splash before presenter scaling.
 
 ## Status
 
