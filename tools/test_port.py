@@ -27,6 +27,7 @@ def main() -> int:
         ROOT / "portmaster" / "Guacamelee.sh",
         PORT / "setup.sh",
         ROOT / "tools" / "build_tsps_bridge.sh",
+        ROOT / "tools" / "build_gl4es_tsps_container.sh",
         ROOT / "tools" / "build_hardext_fix.sh",
         ROOT / "tools" / "build_port.sh",
     ]:
@@ -57,12 +58,15 @@ def main() -> int:
     launcher_source = (ROOT / "portmaster" / "Guacamelee.sh").read_text()
     hardext_source = (ROOT / "compat" / "hardext_fix.c").read_text()
     safe_patch = (ROOT / "patches" / "gl4es-tsps-safe-profile.patch").read_text()
-    gl4es_build = (ROOT / "tools" / "build_gl4es_tsps.sh").read_text()
+    gl4es_build = (ROOT / "tools" / "build_gl4es_tsps_container.sh").read_text()
     assert 'hardext.maxcolorattach = 1' in safe_patch
     assert 'hardext.depthstencil = 1' in safe_patch
     assert 'hardext.depth24 = 1' in safe_patch
+    assert 'GL4ES_CONTAINER_IMAGE:-docker.io/library/ubuntu:20.04' in gl4es_build
+    assert 'gcc-arm-linux-gnueabihf' in gl4es_build
+    assert 'PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig' in gl4es_build
+    assert 'readelf --version-info' in gl4es_build
     assert 'apply --check' in gl4es_build
-    assert 'GL4ES_SRC:-/tmp/gl4es-tsps-source' in gl4es_build
     assert 'static struct vao_shadow vaos[128]' in source
     assert 'static struct vao_shadow vao0' in source
     assert 'find_vao' in source
