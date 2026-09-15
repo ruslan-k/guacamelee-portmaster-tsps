@@ -173,8 +173,9 @@ def main() -> int:
     assert 'int game_h = 768;' in server_main_source
     assert 'tspgl_dimension("TSPGL_WIDTH", 1024)' in source
     assert 'tspgl_dimension("TSPGL_HEIGHT", 768)' in source
-    assert 'st_viewport[2] = 1024' in xport_source
-    assert 'st_viewport[3] = 768' in xport_source
+    assert 'env_dim("TSPGL_WIDTH", 1024)' in xport_source
+    assert 'env_dim("TSPGL_HEIGHT", 768)' in xport_source
+    assert 'GUA-GEOM shadow-init' in xport_source
     assert launcher_source.index('export GUACAMELEE_WIDTH=') < launcher_source.index('export TSPGL_WIDTH=')
     assert 'GUACAMELEE_XPORT_DIAG="${GUACAMELEE_XPORT_DIAG:-0}"' in launcher_source
     for marker in [

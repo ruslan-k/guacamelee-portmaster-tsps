@@ -37,6 +37,17 @@ static int xport_diag_enabled(void)
     return xport_diag;
 }
 
+static int env_dim(const char *name, int fallback)
+{
+    const char *v = getenv(name);
+    char *end = NULL;
+    long n;
+    if (!v || !*v) return fallback;
+    n = strtol(v, &end, 10);
+    if (!end || *end || n <= 0 || n > 8192) return fallback;
+    return (int)n;
+}
+
 static int real_glerror_enabled(void)
 {
     const char *v;
@@ -77,10 +88,20 @@ struct tspgl_shared *tspgl_shared(void)
                 X->sock = -1;
                 X->pid = pid;
                 X->unpack_align = 4;
-                X->st_viewport[2] = 1024;
-                X->st_viewport[3] = 768;
-                X->st_scissor[2] = 1024;
-                X->st_scissor[3] = 768;
+                {
+                    int w = env_dim("TSPGL_WIDTH", 1024);
+                    int h = env_dim("TSPGL_HEIGHT", 768);
+                    X->st_viewport[0] = 0;
+                    X->st_viewport[1] = 0;
+                    X->st_viewport[2] = w;
+                    X->st_viewport[3] = h;
+                    X->st_scissor[0] = 0;
+                    X->st_scissor[1] = 0;
+                    X->st_scissor[2] = w;
+                    X->st_scissor[3] = h;
+                    if (xport_diag_enabled())
+                        fprintf(stderr, "GUA-GEOM shadow-init viewport=0,0,%d,%d scissor=0,0,%d,%d\\n", w, h, w, h);
+                }
                 X->magic = XPORT_MAGIC;
                 fprintf(stderr, "tspgl: shared xport pid=%d\n", (int)pid);
             }

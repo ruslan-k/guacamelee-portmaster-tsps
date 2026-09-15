@@ -685,14 +685,19 @@ static int gl_limit_pname(GLenum pname)
 
 static int get_local_int(GLenum pname, GLint *params)
 {
+    static unsigned geom_logs;
     if (!params)
         return 1;
     switch (pname) {
     case 0x0BA2: /* VIEWPORT */
         memcpy(params, st_viewport, 16);
+        if (getenv("GUACAMELEE_XPORT_DIAG") && geom_logs++ < 8)
+            fprintf(stderr, "GUA-GEOM get GL_VIEWPORT -> %d,%d,%d,%d\\n", params[0], params[1], params[2], params[3]);
         return 1;
     case 0x0C10: /* SCISSOR_BOX */
         memcpy(params, st_scissor, 16);
+        if (getenv("GUACAMELEE_XPORT_DIAG") && geom_logs++ < 8)
+            fprintf(stderr, "GUA-GEOM get GL_SCISSOR_BOX -> %d,%d,%d,%d\\n", params[0], params[1], params[2], params[3]);
         return 1;
     case 0x84E0: /* ACTIVE_TEXTURE */
         params[0] = (GLint)(0x84C0 + active_tex);
