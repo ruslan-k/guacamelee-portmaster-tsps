@@ -78,10 +78,8 @@ def main() -> int:
     assert 'eglQuerySurface' in source
     assert "src[total++] = '\\n';" in server_source
     assert 'strip_img_ubo' in server_source
-    assert 'GUACAMELEE_INPUT_MODE' in launcher_source
-    assert 'input_mode=xbox360' in launcher_source
-    assert '"game-bin" -x' in launcher_source
-    assert 'input_mode=keyboard' in launcher_source
+    assert 'input_mode=guest_evdev' in launcher_source
+    assert 'libgua_evdev_input.so' in launcher_source
 
     # The bundled gl4es hardware probe intentionally submits desktop GLSL 120
     # shaders with IMG-specific layout qualifiers. Through the 32->64 proxy we
@@ -168,8 +166,8 @@ def main() -> int:
     assert 'TSPGL_DEPTH_ONLY_READ_NONE' in server_main_source
     assert 'GUACAMELEE_DEPTH_ONLY_READ_NONE="${GUACAMELEE_DEPTH_ONLY_READ_NONE:-0}"' in launcher_source
     assert 'GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-0}"' in launcher_source
-    assert 'GUACAMELEE_WIDTH:-1024' in launcher_source
-    assert 'GUACAMELEE_HEIGHT:-768' in launcher_source
+    assert 'GUACAMELEE_WIDTH:-1280' in launcher_source
+    assert 'GUACAMELEE_HEIGHT:-720' in launcher_source
     assert '#define NFSMW_FRAME_MAX_H 768' in frame_source
     assert 'int game_w = 1024;' in server_main_source
     assert 'int game_h = 768;' in server_main_source

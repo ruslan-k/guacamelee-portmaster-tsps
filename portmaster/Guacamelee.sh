@@ -57,6 +57,9 @@ fi
 export XDG_DATA_HOME="$GAMEDIR/conf"
 export SDL_GAMECONTROLLERCONFIG="${sdl_controllerconfig:-${SDL_GAMECONTROLLERCONFIG:-}}"
 export SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1
+export SDL_JOYSTICK_HIDAPI=0
+unset SDL_GAMECONTROLLER_IGNORE_DEVICES
+unset SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT
 export SDL_NO_SIGNAL_HANDLERS=1
 export MALLOC_ARENA_MAX=2
 
@@ -94,11 +97,11 @@ if [ "$BRIDGE" -eq 1 ]; then
     exit 2
   fi
 
-  export GUACAMELEE_WIDTH="${GUACAMELEE_WIDTH:-1024}"
-  export GUACAMELEE_HEIGHT="${GUACAMELEE_HEIGHT:-768}"
+  export GUACAMELEE_WIDTH="${GUACAMELEE_WIDTH:-1280}"
+  export GUACAMELEE_HEIGHT="${GUACAMELEE_HEIGHT:-720}"
   export TSPGL_WIDTH="$GUACAMELEE_WIDTH"
   export TSPGL_HEIGHT="$GUACAMELEE_HEIGHT"
-  export TSPGL_PRESENT="${GUACAMELEE_PRESENT_MODE:-crop}"
+  export TSPGL_PRESENT="${GUACAMELEE_PRESENT:-crop}"
   export GUACAMELEE_GL_DIAG="${GUACAMELEE_GL_DIAG:-0}"
   export GUACAMELEE_FBO_LIFECYCLE="${GUACAMELEE_FBO_LIFECYCLE:-0}"
   export GUACAMELEE_XPORT_DIAG="${GUACAMELEE_XPORT_DIAG:-0}"
@@ -225,29 +228,9 @@ if [ "$BRIDGE" -eq 1 ]; then
   echo "bridge_dimensions=${TSPGL_WIDTH}x${TSPGL_HEIGHT}"
   echo "box86_dynarec=$BOX86_DYNAREC bigblock=$BOX86_DYNAREC_BIGBLOCK log=$BOX86_LOG dlsym_error=$BOX86_DLSYM_ERROR dynarec_log=$BOX86_DYNAREC_LOG"
   echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fbotex=$LIBGL_FBOFORCETEX fb=$LIBGL_FB diag=$GUACAMELEE_GL_DIAG fbo_lifecycle=$GUACAMELEE_FBO_LIFECYCLE xport_diag=$GUACAMELEE_XPORT_DIAG depth_only_read_none=$GUACAMELEE_DEPTH_ONLY_READ_NONE real_glerror=$GUACAMELEE_REAL_GLERROR khr_debug=$GUACAMELEE_KHR_DEBUG op_ring=$GUACAMELEE_OP_RING pixel_probe=$GUACAMELEE_PIXEL_PROBE zero_viewport=$GUACAMELEE_ZERO_VIEWPORT rb_zero_size=$GUACAMELEE_RB_ZERO_SIZE fbo_texture_fallback=$GUACAMELEE_FBO_TEXTURE_FALLBACK unify_depth_stencil=$GUACAMELEE_UNIFY_DEPTH_STENCIL rb_format_fix=$GUACAMELEE_RB_FORMAT_FIX frontend_rb_size_fix=$GUACAMELEE_FRONTEND_RB_SIZE_FIX hardext_fix=$GUACAMELEE_HARDEXT_FIX"
-  INPUT_MODE="${GUACAMELEE_INPUT_MODE:-xbox360}"
-  case "$INPUT_MODE" in
-    native|none)
-      echo "input_mode=$INPUT_MODE (no gameplay helper)"
-      ;;
-    xbox360)
-      echo "input_mode=xbox360 helper=$GPTOKEYB2"
-      $GPTOKEYB2 "game-bin" -x &
-      sleep 1
-      ;;
-    keyboard)
-      echo "input_mode=keyboard helper=$GPTOKEYB2"
-      $GPTOKEYB2 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
-      ;;
-    legacy)
-      echo "input_mode=legacy helper=$GPTOKEYB"
-      $GPTOKEYB "game-bin" &
-      ;;
-    *)
-      echo "unknown GUACAMELEE_INPUT_MODE=$INPUT_MODE" >&2
-      exit 2
-      ;;
-  esac
+  echo "input_mode=guest_evdev shim=$GAMEDIR/compat/libgua_evdev_input.so"
+  [ -f "$GAMEDIR/compat/libgua_evdev_input.so" ] || { echo "guest evdev shim missing" >&2; exit 2; }
+  export BOX86_LD_PRELOAD="$GAMEDIR/compat/libgua_sdl_mode_fix.so:$GAMEDIR/compat/libgua_evdev_input.so${BOX86_LD_PRELOAD:+:$BOX86_LD_PRELOAD}"
   pm_platform_helper "$GAMEDIR/box86/box86"
   if [ "$GUACAMELEE_HARDEXT_FIX" != "0" ]; then
     if [ "${GUACAMELEE_STRACE:-0}" != "0" ] && command -v strace >/dev/null 2>&1; then
@@ -270,29 +253,9 @@ else
   export BOX86_LD_LIBRARY_PATH="$GAMEDIR/box86/x86:$GAMEDIR/gamedata/lib32:$GAMEDIR/libs/x86"
   export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es/libGL.so.1"
   export LIBGL_SHRINK=4
-  INPUT_MODE="${GUACAMELEE_INPUT_MODE:-xbox360}"
-  case "$INPUT_MODE" in
-    native|none)
-      echo "input_mode=$INPUT_MODE (no gameplay helper)"
-      ;;
-    xbox360)
-      echo "input_mode=xbox360 helper=$GPTOKEYB2"
-      $GPTOKEYB2 "game-bin" -x &
-      sleep 1
-      ;;
-    keyboard)
-      echo "input_mode=keyboard helper=$GPTOKEYB2"
-      $GPTOKEYB2 "game-bin" -c "$GAMEDIR/guacamelee.ini" &
-      ;;
-    legacy)
-      echo "input_mode=legacy helper=$GPTOKEYB"
-      $GPTOKEYB "game-bin" &
-      ;;
-    *)
-      echo "unknown GUACAMELEE_INPUT_MODE=$INPUT_MODE" >&2
-      exit 2
-      ;;
-  esac
+  echo "input_mode=guest_evdev shim=$GAMEDIR/compat/libgua_evdev_input.so"
+  [ -f "$GAMEDIR/compat/libgua_evdev_input.so" ] || { echo "guest evdev shim missing" >&2; exit 2; }
+  export BOX86_LD_PRELOAD="$GAMEDIR/compat/libgua_sdl_mode_fix.so:$GAMEDIR/compat/libgua_evdev_input.so${BOX86_LD_PRELOAD:+:$BOX86_LD_PRELOAD}"
   pm_platform_helper "$GAMEDIR/box86/box86"
   "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin"
   result=$?
