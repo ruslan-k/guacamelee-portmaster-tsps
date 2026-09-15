@@ -231,8 +231,8 @@ if [ "$BRIDGE" -eq 1 ]; then
     $INPUT_HELPER "game-bin" &
   else
     INPUT_HELPER="$GPTOKEYB2"
-    echo "input_helper=$INPUT_HELPER (upstream-default-map)"
-    $INPUT_HELPER "game-bin" &
+    echo "input_helper=$INPUT_HELPER (ini-map)"
+    $INPUT_HELPER "game-bin" -c "$GAMEDIR/guacamelee.ini" &
   fi
   pm_platform_helper "$GAMEDIR/box86/box86"
   if [ "$GUACAMELEE_HARDEXT_FIX" != "0" ]; then
@@ -262,8 +262,8 @@ else
     $INPUT_HELPER "game-bin" &
   else
     INPUT_HELPER="$GPTOKEYB2"
-    echo "input_helper=$INPUT_HELPER (upstream-default-map)"
-    $INPUT_HELPER "game-bin" &
+    echo "input_helper=$INPUT_HELPER (ini-map)"
+    $INPUT_HELPER "game-bin" -c "$GAMEDIR/guacamelee.ini" &
   fi
   pm_platform_helper "$GAMEDIR/box86/box86"
   "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin"
