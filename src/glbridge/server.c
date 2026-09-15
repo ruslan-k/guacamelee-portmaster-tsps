@@ -2711,7 +2711,17 @@ static void present_swap(void)
     sc[2] = game_w;
     sc[3] = game_h;
 
-    if (present_letterbox) {
+    if (present_letterbox == 2) {
+        if ((long)win_w * (long)game_h >= (long)win_h * (long)game_w) {
+            dw = win_w;
+            dh = (int)((long)game_h * win_w / game_w);
+        } else {
+            dh = win_h;
+            dw = (int)((long)game_w * win_h / game_h);
+        }
+        dx = (win_w - dw) / 2;
+        dy = (win_h - dh) / 2;
+    } else if (present_letterbox) {
         if ((long)win_w * (long)game_h <= (long)win_h * (long)game_w) {
             dw = win_w;
             dh = (int)((long)game_h * win_w / game_w);
@@ -3219,12 +3229,14 @@ int main(void)
         if (mode != NULL) {
             if (strcmp(mode, "letterbox") == 0 || strcmp(mode, "fit") == 0)
                 present_letterbox = 1;
+            else if (strcmp(mode, "crop") == 0)
+                present_letterbox = 2;
             else if (strcmp(mode, "stretch") == 0 || strcmp(mode, "fill") == 0)
                 present_letterbox = 0;
         }
-        fprintf(stderr, "tspgl-srv: present %s %dx%d -> %dx%d\n",
-                present_letterbox ? "letterbox" : "stretch", game_w, game_h,
-                win_w, win_h);
+        fprintf(stderr, "tspgl-srv: present %s %dx%d -> %dx%d\\n",
+                present_letterbox == 2 ? "crop" : (present_letterbox ? "letterbox" : "stretch"),
+                game_w, game_h, win_w, win_h);
     }
 
     frame_map = open_frame();
