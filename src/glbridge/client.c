@@ -154,8 +154,37 @@ struct vao_shadow {
     struct attrib attrib[16];
 };
 static struct attrib attribs[16];
-static struct vao_shadow vaos[32];
-static struct vao_shadow *current_vao;
+static struct vao_shadow vaos[128];
+static struct vao_shadow vao0;
+static struct vao_shadow *current_vao = &vao0;
+
+static struct vao_shadow *find_vao(GLuint id, int create)
+{
+    unsigned i;
+    if (id == 0)
+        return &vao0;
+    for (i = 0; i < 128; ++i)
+        if (vaos[i].id == id)
+            return &vaos[i];
+    if (!create)
+        return NULL;
+    for (i = 0; i < 128; ++i) {
+        if (vaos[i].id == 0) {
+            vaos[i].id = id;
+            vaos[i].element_buffer = 0;
+            memset(vaos[i].attrib, 0, sizeof(vaos[i].attrib));
+            return &vaos[i];
+        }
+    }
+    return NULL;
+}
+
+__attribute__((constructor)) static void init_vao0(void)
+{
+    memset(&vao0, 0, sizeof(vao0));
+    vao0.id = 0;
+    current_vao = &vao0;
+}
 
 static unsigned type_bytes(GLenum type)
 {
@@ -505,8 +534,19 @@ void glDeleteVertexArrays(int32_t n, const uint32_t *ids)
     if (!ids)
         return;
     for (i = 0; i < n; ++i) {
-        if (ids[i] && ids[i] == bound_vao)
-            bound_vao = 0;
+        struct vao_shadow *v;
+        if (!ids[i])
+            continue;
+        v = find_vao(ids[i], 0);
+        if (v) {
+            if (v == current_vao) {
+                current_vao = &vao0;
+                memcpy(attribs, vao0.attrib, sizeof(attribs));
+                bound_element = 0;
+                bound_vao = 0;
+            }
+            memset(v, 0, sizeof(*v));
+        }
     }
 }
 
@@ -1482,17 +1522,14 @@ GLboolean glUnmapBuffer(GLenum target)
 void glBindVertexArray(GLuint array)
 {
     uint32_t u = array;
-    bound_vao = array;
-    if (array < 32) {
-        if (vaos[array].id == 0)
-            vaos[array].id = array;
-        current_vao = &vaos[array];
+    current_vao = find_vao(array, 1);
+    if (current_vao) {
         memcpy(attribs, current_vao->attrib, sizeof(attribs));
         bound_element = current_vao->element_buffer;
     } else {
-        current_vao = NULL;
         bound_element = 0;
     }
+    bound_vao = array;
     tspgl_call(OP_glBindVertexArray, &u, 4, NULL, 0);
 }
 

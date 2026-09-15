@@ -39,6 +39,10 @@ echo "===== guacamelee start ====="
 date 2>/dev/null || true
 echo "uname=$(uname -a)"
 echo "platform=${PLATFORM:-unset} arch=${PLATFORM_ARCHITECTURE:-unset} cfw=${CFW_NAME:-unset}"
+if [ -d /dev/shm ] && [ -w /dev/shm ]; then
+  mkdir -p /dev/shm/portmaster 2>/dev/null || true
+fi
+echo "portmaster_shm=$( [ -d /dev/shm/portmaster ] && echo present || echo unavailable )"
 
 export PORTMASTER_CONTROLFOLDER="$controlfolder"
 if [ ! -f "$GAMEDIR/gamedata/game-bin" ]; then

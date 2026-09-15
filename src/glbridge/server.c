@@ -362,8 +362,11 @@ static void (*real_tex_paramf)(uint32_t, uint32_t, float);
 static int splash_live;
 static uint32_t splash_tex;
 static uint32_t splash_prog;
+static uint32_t present_prog;
 static int32_t splash_loc_pos;
 static int32_t splash_loc_uv;
+static int32_t present_loc_pos;
+static int32_t present_loc_uv;
 
 typedef void (*tspgl_debug_callback)(uint32_t, uint32_t, uint32_t,
                                       uint32_t, int32_t, const char *,
@@ -2054,28 +2057,41 @@ static int splash_setup(void)
 static int present_program_setup(void)
 {
     int32_t linked = 0;
-    int32_t (*get_attr)(uint32_t, const char *) = (void *)G.glGetAttribLocation;
-    int32_t (*get_uni)(uint32_t, const char *) = (void *)G.glGetUniformLocation;
+    int32_t (*get_attr)(uint32_t, const char *) = (void *)gl_get("glGetAttribLocation");
+    int32_t (*get_uni)(uint32_t, const char *) = (void *)gl_get("glGetUniformLocation");
+    void (*get_prog)(uint32_t, uint32_t, int32_t *) = (void *)gl_get("glGetProgramiv");
+    uint32_t (*create_shader)(uint32_t) = (void *)gl_get("glCreateShader");
+    uint32_t (*create_program)(void) = (void *)gl_get("glCreateProgram");
+    void (*source)(uint32_t,int32_t,const char *const *,const int32_t *) = (void *)gl_get("glShaderSource");
+    void (*compile)(uint32_t) = (void *)gl_get("glCompileShader");
+    void (*attach)(uint32_t,uint32_t) = (void *)gl_get("glAttachShader");
+    void (*link)(uint32_t) = (void *)gl_get("glLinkProgram");
+    void (*use)(uint32_t) = (void *)gl_get("glUseProgram");
+    void (*uniform)(int32_t,int32_t) = (void *)gl_get("glUniform1i");
+    const char *v = splash_vs, *f = splash_fs;
     uint32_t vs, fs;
-    if (splash_prog || !G.glCreateProgram || !get_attr || !get_uni)
-        return splash_prog ? 0 : -1;
-    vs = splash_compile(GL_VERTEX_SHADER, splash_vs);
-    fs = splash_compile(GL_FRAGMENT_SHADER, splash_fs);
-    splash_prog = G.glCreateProgram();
-    if (!vs || !fs || !splash_prog)
+    if (present_prog || !create_shader || !create_program || !source || !compile ||
+        !attach || !link || !get_attr || !get_uni || !get_prog)
+        return present_prog ? 0 : -1;
+    vs = create_shader(GL_VERTEX_SHADER);
+    fs = create_shader(GL_FRAGMENT_SHADER);
+    if (!vs || !fs)
         return -1;
-    G.glAttachShader(splash_prog, vs);
-    G.glAttachShader(splash_prog, fs);
-    G.glLinkProgram(splash_prog);
-    if (G.glGetProgramiv)
-        ((void (*)(uint32_t, uint32_t, int32_t *))G.glGetProgramiv)(
-            splash_prog, GL_LINK_STATUS, &linked);
+    source(vs, 1, &v, NULL); compile(vs);
+    source(fs, 1, &f, NULL); compile(fs);
+    present_prog = create_program();
+    if (!present_prog)
+        return -1;
+    attach(present_prog, vs); attach(present_prog, fs); link(present_prog);
+    get_prog(present_prog, GL_LINK_STATUS, &linked);
     if (!linked)
         return -1;
-    splash_loc_pos = get_attr(splash_prog, "a_pos");
-    splash_loc_uv = get_attr(splash_prog, "a_uv");
-    G.glUseProgram(splash_prog);
-    G.glUniform1i(get_uni(splash_prog, "u_tex"), 0);
+    present_loc_pos = get_attr(present_prog, "a_pos");
+    present_loc_uv = get_attr(present_prog, "a_uv");
+    if (use) use(present_prog);
+    if (uniform) uniform(get_uni(present_prog, "u_tex"), 0);
+    fprintf(stderr, "GUA-PRESCTX-PROGRAM program=%u pos=%d uv=%d\\n",
+            present_prog, present_loc_pos, present_loc_uv);
     return 0;
 }
 
@@ -2551,31 +2567,42 @@ static void present_game_texture(int dx, int dy, int dw, int dh)
         -1.f, -1.f, 0.f, 1.f, 1.f, -1.f, 1.f, 1.f,
         -1.f,  1.f, 0.f, 0.f, 1.f,  1.f, 1.f, 0.f,
     };
-    void (*attrib)(uint32_t, int32_t, uint32_t, uint32_t, int32_t, const void *) =
-        (void *)G.glVertexAttribPointer;
-    void (*enable_attr)(uint32_t) = (void *)G.glEnableVertexAttribArray;
-    void (*draw)(uint32_t, int32_t, int32_t) = (void *)G.glDrawArrays;
-    void (*gen_vao)(int32_t, uint32_t *) = (void *)G.glGenVertexArrays;
-    void (*bind_vao)(uint32_t) = (void *)G.glBindVertexArray;
+    void (*p_attrib)(uint32_t, int32_t, uint32_t, uint32_t, int32_t, const void *) =
+        (void *)gl_get("glVertexAttribPointer");
+    void (*p_enable)(uint32_t) = (void *)gl_get("glEnableVertexAttribArray");
+    void (*p_draw)(uint32_t, int32_t, int32_t) = (void *)gl_get("glDrawArrays");
+    void (*p_use)(uint32_t) = (void *)gl_get("glUseProgram");
+    void (*p_viewport)(int32_t,int32_t,int32_t,int32_t) = (void *)gl_get("glViewport");
+    void (*p_disable)(uint32_t) = (void *)gl_get("glDisable");
+    void (*p_mask)(uint8_t,uint8_t,uint8_t,uint8_t) = (void *)gl_get("glColorMask");
+    void (*p_active)(uint32_t) = (void *)gl_get("glActiveTexture");
+    void (*p_bindtex)(uint32_t,uint32_t) = (void *)gl_get("glBindTexture");
+    void (*p_bindbuf)(uint32_t,uint32_t) = (void *)gl_get("glBindBuffer");
+    void (*p_genbuf)(int32_t,uint32_t *) = (void *)gl_get("glGenBuffers");
+    void (*p_data)(uint32_t,intptr_t,const void *,uint32_t) = (void *)gl_get("glBufferData");
+    void (*p_genvao)(int32_t,uint32_t *) = (void *)gl_get("glGenVertexArraysOES");
+    void (*p_bindvao)(uint32_t) = (void *)gl_get("glBindVertexArrayOES");
+    void (*p_clearcolor)(float,float,float,float) = (void *)gl_get("glClearColor");
+    void (*p_clear)(uint32_t) = (void *)gl_get("glClear");
+    void (*p_read)(int32_t,int32_t,int32_t,int32_t,uint32_t,uint32_t,void *) = (void *)gl_get("glReadPixels");
+    void (*attrib)(uint32_t, int32_t, uint32_t, uint32_t, int32_t, const void *) = p_attrib;
+    void (*enable_attr)(uint32_t) = p_enable;
+    void (*draw)(uint32_t, int32_t, int32_t) = p_draw;
     fprintf(stderr, "GUA-PRESCTX-ENTER ctx=%p texture=%u program=%u attrib=%p enable=%p draw=%p\\n",
-            present_ctx, game_color, splash_prog, (void *)attrib,
-            (void *)enable_attr, (void *)draw);
-    void (*gen_vbo)(int32_t, uint32_t *) = (void *)G.glGenBuffers;
-    void (*bind_vbo)(uint32_t, uint32_t) = (void *)G.glBindBuffer;
-    void (*data_vbo)(uint32_t, intptr_t, const void *, uint32_t) =
-        (void *)G.glBufferData;
-    if (!splash_prog || !game_color || !attrib || !enable_attr || !draw)
+            present_ctx, game_color, splash_prog, (void *)p_attrib,
+            (void *)p_enable, (void *)p_draw);
+    if (!present_prog || !game_color || !p_attrib || !p_enable || !p_draw || !p_use)
         return;
-    if (!present_vao && gen_vao)
-        gen_vao(1, &present_vao);
-    if (bind_vao && present_vao)
-        bind_vao(present_vao);
-    if (!present_vbo && gen_vbo)
-        gen_vbo(1, &present_vbo);
-    if (bind_vbo && present_vbo)
-        bind_vbo(GL_ARRAY_BUFFER, present_vbo);
-    if (data_vbo && present_vbo)
-        data_vbo(GL_ARRAY_BUFFER, (intptr_t)sizeof(quad), quad, GL_STATIC_DRAW);
+    if (!present_vao && p_genvao)
+        p_genvao(1, &present_vao);
+    if (p_bindvao && present_vao)
+        p_bindvao(present_vao);
+    if (!present_vbo && p_genbuf)
+        p_genbuf(1, &present_vbo);
+    if (p_bindbuf && present_vbo)
+        p_bindbuf(GL_ARRAY_BUFFER, present_vbo);
+    if (p_data && present_vbo)
+        p_data(GL_ARRAY_BUFFER, (intptr_t)sizeof(quad), quad, GL_STATIC_DRAW);
     if (G.glGetError) {
         uint32_t e = G.glGetError();
         if (e) fprintf(stderr, "GUA-PRESCTX-VBO err=0x%x\\n", e);
@@ -2585,42 +2612,47 @@ static void present_game_texture(int dx, int dy, int dw, int dh)
     if (real_check_fb)
         fprintf(stderr, "GUA-PRESCTX-FBO status=0x%x\\n",
                 real_check_fb(GL_FRAMEBUFFER));
-    if (G.glViewport)
-        G.glViewport(0, 0, win_w, win_h);
-    if (G.glDisable) {
-        G.glDisable(GL_DEPTH_TEST);
-        G.glDisable(GL_CULL_FACE);
-        G.glDisable(GL_BLEND);
-        G.glDisable(GL_SCISSOR_TEST);
+    if (getenv("GUACAMELEE_PRESENTER_MAGENTA") && p_clearcolor && p_clear) {
+        p_clearcolor(1.f, 0.f, 1.f, 1.f);
+        p_clear(GL_COLOR_BUFFER_BIT);
+        fprintf(stderr, "GUA-PRESCTX-MAGENTA clear=issued\\n");
     }
-    if (G.glColorMask)
-        G.glColorMask(1u, 1u, 1u, 1u);
-    G.glUseProgram(splash_prog);
-    if (G.glActiveTexture)
-        G.glActiveTexture(GL_TEXTURE0);
-    G.glBindTexture(GL_TEXTURE_2D, game_color);
+    if (p_viewport)
+        p_viewport(dx, dy, dw, dh);
+    if (p_disable) {
+        p_disable(GL_DEPTH_TEST);
+        p_disable(GL_CULL_FACE);
+        p_disable(GL_BLEND);
+        p_disable(GL_SCISSOR_TEST);
+    }
+    if (p_mask)
+        p_mask(1u, 1u, 1u, 1u);
+    p_use(present_prog);
+    if (p_active)
+        p_active(GL_TEXTURE0);
+    if (p_bindtex)
+        p_bindtex(GL_TEXTURE_2D, game_color);
     if (G.glGetError)
         (void)G.glGetError();
     if (G.glIsTexture)
         fprintf(stderr, "GUA-PRESCTX-TEX texture=%u visible=%u vao=%u program=%u\\n",
-                game_color, G.glIsTexture(game_color), present_vao, splash_prog);
+                game_color, G.glIsTexture(game_color), present_vao, present_prog);
     fprintf(stderr, "GUA-PRESCTX-LOC pos=%d uv=%d\\n",
-            splash_loc_pos, splash_loc_uv);
-    enable_attr((uint32_t)splash_loc_pos);
-    enable_attr((uint32_t)splash_loc_uv);
+            present_loc_pos, present_loc_uv);
+    enable_attr((uint32_t)present_loc_pos);
+    enable_attr((uint32_t)present_loc_uv);
     if (G.glGetError) {
         uint32_t e = G.glGetError();
         if (e) fprintf(stderr, "GUA-PRESCTX-ENABLE err=0x%x\\n", e);
     }
-    attrib((uint32_t)splash_loc_pos, 2, GL_FLOAT, 0, 16,
+    attrib((uint32_t)present_loc_pos, 2, GL_FLOAT, 0, 16,
            (const void *)(uintptr_t)0);
     if (G.glGetError) {
         uint32_t e = G.glGetError();
         if (e) fprintf(stderr, "GUA-PRESCTX-ATTRPOS err=0x%x\\n", e);
     }
-    attrib((uint32_t)splash_loc_uv, 2, GL_FLOAT, 0, 16,
+    attrib((uint32_t)present_loc_uv, 2, GL_FLOAT, 0, 16,
            (const void *)(uintptr_t)8);
-    (void)dx; (void)dy; (void)dw; (void)dh;
     if (G.glGetError) {
         uint32_t e = G.glGetError();
         if (e) fprintf(stderr, "GUA-PRESCTX-ATTR err=0x%x\\n", e);
@@ -3234,6 +3266,11 @@ int main(void)
                     sdl.get_error());
         else
             fprintf(stderr, "tspgl-srv: shared presenter GLES context created\\n");
+        if (present_ctx && sdl.gl_make_current(window, present_ctx) == 0) {
+            if (present_program_setup() != 0)
+                fprintf(stderr, "tspgl-srv: presenter-local shader setup failed\\n");
+            sdl.gl_make_current(window, glctx);
+        }
         sdl.gl_make_current(window, glctx);
     }
     if (sdl.gl_set_swap)
@@ -3303,7 +3340,7 @@ int main(void)
         splash_present();
         splash_present();
     }
-    if (!splash_prog && present_program_setup() != 0)
+    if (!present_ctx && !splash_prog && present_program_setup() != 0)
         fprintf(stderr, "tspgl-srv: presenter shader setup failed\\n");
 
     if (create_game_fbo() != 0) {

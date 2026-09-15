@@ -56,7 +56,21 @@ def main() -> int:
     frame_source = (ROOT / "src" / "nfsmw_frame.h").read_text()
     launcher_source = (ROOT / "portmaster" / "Guacamelee.sh").read_text()
     hardext_source = (ROOT / "compat" / "hardext_fix.c").read_text()
-    assert 'TSPGL_WIDTH' in source and 'TSPGL_HEIGHT' in source
+    safe_patch = (ROOT / "patches" / "gl4es-tsps-safe-profile.patch").read_text()
+    gl4es_build = (ROOT / "tools" / "build_gl4es_tsps.sh").read_text()
+    assert 'hardext.maxcolorattach = 1' in safe_patch
+    assert 'hardext.depthstencil = 1' in safe_patch
+    assert 'hardext.depth24 = 1' in safe_patch
+    assert 'apply --check' in gl4es_build
+    assert 'GL4ES_SRC:-/tmp/gl4es-tsps-source' in gl4es_build
+    assert 'static struct vao_shadow vaos[128]' in source
+    assert 'static struct vao_shadow vao0' in source
+    assert 'find_vao' in source
+    assert 'current_vao = &vao0' in source
+    assert 'memset(v, 0, sizeof(*v))' in source
+    assert 'indexed = (bound_element != 0)' in source
+    assert 'mkdir -p /dev/shm/portmaster' in launcher_source
+    assert 'portmaster_shm=' in launcher_source
     assert 'eglQuerySurface' in source
     assert "src[total++] = '\\n';" in server_source
     assert 'strip_img_ubo' in server_source
