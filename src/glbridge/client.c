@@ -146,8 +146,16 @@ struct attrib {
     int stride;
     uint32_t ptr;
     int is_offset;
+    GLuint source_buffer;
+};
+struct vao_shadow {
+    GLuint id;
+    GLuint element_buffer;
+    struct attrib attrib[16];
 };
 static struct attrib attribs[16];
+static struct vao_shadow vaos[32];
+static struct vao_shadow *current_vao;
 
 static unsigned type_bytes(GLenum type)
 {
@@ -1089,6 +1097,9 @@ void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
     attribs[index].stride = stride;
     attribs[index].ptr = (uint32_t)(uintptr_t)ptr;
     attribs[index].is_offset = bound_array != 0;
+    attribs[index].source_buffer = bound_array;
+    if (current_vao)
+        current_vao->attrib[index] = attribs[index];
     u[0] = index;
     u[1] = (uint32_t)size;
     u[2] = type;
@@ -1185,7 +1196,7 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx)
 {
     uint32_t hdr[4];
     unsigned esize = type_bytes(type);
-    int indexed = (bound_element || bound_vao);
+    int indexed = (bound_element != 0);
     unsigned nb = indexed ? 0 : (unsigned)count * esize;
     uint8_t *buf;
     unsigned verts = (unsigned)count;
@@ -1472,6 +1483,16 @@ void glBindVertexArray(GLuint array)
 {
     uint32_t u = array;
     bound_vao = array;
+    if (array < 32) {
+        if (vaos[array].id == 0)
+            vaos[array].id = array;
+        current_vao = &vaos[array];
+        memcpy(attribs, current_vao->attrib, sizeof(attribs));
+        bound_element = current_vao->element_buffer;
+    } else {
+        current_vao = NULL;
+        bound_element = 0;
+    }
     tspgl_call(OP_glBindVertexArray, &u, 4, NULL, 0);
 }
 
@@ -1498,24 +1519,33 @@ void glBindBuffer(GLenum target, GLuint buffer)
     uint32_t u[2] = { target, buffer };
     if (target == GL_ARRAY_BUFFER)
         bound_array = buffer;
-    if (target == GL_ELEMENT_ARRAY_BUFFER)
+    if (target == GL_ELEMENT_ARRAY_BUFFER) {
         bound_element = buffer;
+        if (current_vao)
+            current_vao->element_buffer = buffer;
+    }
     tspgl_call(OP_glBindBuffer, u, 8, NULL, 0);
 }
 
 void glEnableVertexAttribArray(GLuint index)
 {
     uint32_t u = index;
-    if (index < 16)
+    if (index < 16) {
         attribs[index].enabled = 1;
+        if (current_vao)
+            current_vao->attrib[index].enabled = 1;
+    }
     tspgl_call(OP_glEnableVertexAttribArray, &u, 4, NULL, 0);
 }
 
 void glDisableVertexAttribArray(GLuint index)
 {
     uint32_t u = index;
-    if (index < 16)
+    if (index < 16) {
         attribs[index].enabled = 0;
+        if (current_vao)
+            current_vao->attrib[index].enabled = 0;
+    }
     tspgl_call(OP_glDisableVertexAttribArray, &u, 4, NULL, 0);
 }
 
