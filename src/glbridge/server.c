@@ -336,7 +336,8 @@ static unsigned fbo_transition_window_ops[4096];
 static unsigned fbo_transition_until_swap[4096];
 static unsigned char fbo_transition_full_done[4096];
 uint32_t game_fbo;
-uint32_t game_color;
+static uint32_t game_color;
+static uint8_t *present_upload_pixels;
 uint32_t game_depth;
 static void (*real_bind_fb)(uint32_t, uint32_t);
 static void (*real_get_integerv)(uint32_t, int32_t *);
@@ -2577,6 +2578,8 @@ static void present_game_texture(int dx, int dy, int dw, int dh)
     void (*p_mask)(uint8_t,uint8_t,uint8_t,uint8_t) = (void *)gl_get("glColorMask");
     void (*p_active)(uint32_t) = (void *)gl_get("glActiveTexture");
     void (*p_bindtex)(uint32_t,uint32_t) = (void *)gl_get("glBindTexture");
+    void (*p_teximage)(uint32_t,int32_t,int32_t,int32_t,int32_t,int32_t,uint32_t,uint32_t,const void *) =
+        (void *)gl_get("glTexImage2D");
     void (*p_bindbuf)(uint32_t,uint32_t) = (void *)gl_get("glBindBuffer");
     void (*p_genbuf)(int32_t,uint32_t *) = (void *)gl_get("glGenBuffers");
     void (*p_data)(uint32_t,intptr_t,const void *,uint32_t) = (void *)gl_get("glBufferData");
@@ -2632,6 +2635,9 @@ static void present_game_texture(int dx, int dy, int dw, int dh)
         p_active(GL_TEXTURE0);
     if (p_bindtex)
         p_bindtex(GL_TEXTURE_2D, game_color);
+    if (getenv("GUACAMELEE_PRESENT_UPLOAD") && present_upload_pixels && p_teximage)
+        p_teximage(GL_TEXTURE_2D, 0, GL_RGBA, game_w, game_h, 0,
+                   GL_RGBA, GL_UNSIGNED_BYTE, present_upload_pixels);
     if (G.glGetError)
         (void)G.glGetError();
     if (G.glIsTexture)
@@ -2775,6 +2781,20 @@ static void present_swap(void)
     }
     if (G.glFinish)
         G.glFinish();
+    if (getenv("GUACAMELEE_PRESENT_UPLOAD") && real_bind_fb) {
+        void (*read_pixels)(int32_t,int32_t,int32_t,int32_t,uint32_t,uint32_t,void *) =
+            (void *)gl_get("glReadPixels");
+        size_t bytes = (size_t)game_w * (size_t)game_h * 4u;
+        if (!present_upload_pixels)
+            present_upload_pixels = malloc(bytes);
+        if (present_upload_pixels && read_pixels) {
+            real_bind_fb(GL_READ_FRAMEBUFFER, source_fbo);
+            read_pixels(0, 0, game_w, game_h, GL_RGBA, GL_UNSIGNED_BYTE,
+                        present_upload_pixels);
+            fprintf(stderr, "GUA-PRESCTX-UPLOAD capture=%dx%d bytes=%zu\\n",
+                    game_w, game_h, bytes);
+        }
+    }
     if (present_ctx && sdl.gl_make_current) {
         if (sdl.gl_make_current(window, present_ctx) != 0) {
             fprintf(stderr, "tspgl-srv: presenter MakeCurrent failed: %s\\n",
