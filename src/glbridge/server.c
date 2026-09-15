@@ -174,6 +174,7 @@ static void gl_diag_fbo_result(uint32_t op, const uint8_t *out,
 #define SDL_GL_CONTEXT_PROFILE_MASK 21
 #define SDL_GL_CONTEXT_PROFILE_ES 4
 
+#define SDL_GL_SHARE_WITH_CURRENT_CONTEXT 22
 #define GL_TEXTURE_2D 0x0DE1
 #define GL_TEXTURE_CUBE_MAP 0x8513
 #define GL_RGBA 0x1908
@@ -337,6 +338,7 @@ static unsigned fbo_transition_until_swap[4096];
 static unsigned char fbo_transition_full_done[4096];
 uint32_t game_fbo;
 static uint32_t game_color;
+static int presenter_shared = -1;
 static uint8_t *present_upload_pixels;
 uint32_t game_depth;
 static void (*real_bind_fb)(uint32_t, uint32_t);
@@ -2565,8 +2567,8 @@ static void fbo_transition_after(uint32_t op, const uint8_t *in,
 static void present_game_texture(int dx, int dy, int dw, int dh)
 {
     static const float quad[] = {
-        -1.f, -1.f, 0.f, 1.f, 1.f, -1.f, 1.f, 1.f,
-        -1.f,  1.f, 0.f, 0.f, 1.f,  1.f, 1.f, 0.f,
+        -1.f, -1.f, 0.f, 0.f, 1.f, -1.f, 1.f, 0.f,
+        -1.f,  1.f, 0.f, 1.f, 1.f,  1.f, 1.f, 1.f,
     };
     void (*p_attrib)(uint32_t, int32_t, uint32_t, uint32_t, int32_t, const void *) =
         (void *)gl_get("glVertexAttribPointer");
@@ -3278,9 +3280,11 @@ int main(void)
         return 1;
     }
     if (sdl.gl_set_attr && sdl.gl_create_context) {
-        sdl.gl_set_attr(0x0007, 1); /* SDL_GL_SHARE_WITH_CURRENT_CONTEXT */
+        if (sdl.gl_set_attr(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1) != 0)
+            fprintf(stderr, "tspgl-srv: enabling GL context sharing failed: %s\\n",
+                    sdl.get_error());
         present_ctx = sdl.gl_create_context(window);
-        sdl.gl_set_attr(0x0007, 0);
+        sdl.gl_set_attr(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
         if (!present_ctx)
             fprintf(stderr, "tspgl-srv: shared presenter context unavailable: %s\\n",
                     sdl.get_error());
@@ -3364,8 +3368,15 @@ int main(void)
         fprintf(stderr, "tspgl-srv: presenter shader setup failed\\n");
 
     if (create_game_fbo() != 0) {
-        fprintf(stderr, "tspgl-srv: FBO failed, default framebuffer\n");
+        fprintf(stderr, "tspgl-srv: FBO failed, default framebuffer\\n");
         game_fbo = 0;
+    }
+    if (present_ctx && sdl.gl_make_current(window, present_ctx) == 0) {
+        uint8_t (*p_is_texture)(uint32_t) = (void *)gl_get("glIsTexture");
+        presenter_shared = p_is_texture && p_is_texture(game_color) ? 1 : 0;
+        fprintf(stderr, "GUA-PRESCTX-SHARE texture=%u shared=%d\\n",
+                game_color, presenter_shared);
+        sdl.gl_make_current(window, glctx);
     }
     real_bind_fb = G.glBindFramebuffer;
     if (game_fbo)
