@@ -2580,11 +2580,11 @@ static void present_game_texture(int dx, int dy, int dw, int dh)
         uint32_t e = G.glGetError();
         if (e) fprintf(stderr, "GUA-PRESCTX-VBO err=0x%x\\n", e);
     }
-    if (G.glBindFramebuffer)
-        G.glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    if (G.glCheckFramebufferStatus)
+    if (real_bind_fb)
+        real_bind_fb(GL_FRAMEBUFFER, 0);
+    if (real_check_fb)
         fprintf(stderr, "GUA-PRESCTX-FBO status=0x%x\\n",
-                ((uint32_t (*)(uint32_t))G.glCheckFramebufferStatus)(GL_FRAMEBUFFER));
+                real_check_fb(GL_FRAMEBUFFER));
     if (G.glViewport)
         G.glViewport(0, 0, win_w, win_h);
     if (G.glDisable) {
