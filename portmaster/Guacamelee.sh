@@ -118,6 +118,7 @@ if [ "$BRIDGE" -eq 1 ]; then
   export GUACAMELEE_FBO_CENSUS="${GUACAMELEE_FBO_CENSUS:-0}"
   export GUACAMELEE_FBO_TRANSITION_TRACE="${GUACAMELEE_FBO_TRANSITION_TRACE:-0}"
   export GUACAMELEE_FBO_TRANSITION_MIN_SWAP="${GUACAMELEE_FBO_TRANSITION_MIN_SWAP:-100}"
+  export GUACAMELEE_GL4ES_COMPOSE_DIAG="${GUACAMELEE_GL4ES_COMPOSE_DIAG:-0}"
   export TSPGL_PRESENT_LAST_FBO="${GUACAMELEE_PRESENT_LAST_FBO:-0}"
   export TSPGL_PRESENT_SET_READ_BUFFER="${GUACAMELEE_PRESENT_SET_READ_BUFFER:-0}"
   export TSPGL_HOLD_SWAP="${GUACAMELEE_HOLD_SWAP:-0}"
@@ -198,10 +199,20 @@ if [ "$BRIDGE" -eq 1 ]; then
   export LIBGL_SHRINK="${GUACAMELEE_LIBGL_SHRINK:-4}"
   export LIBGL_FBOFORCETEX="${GUACAMELEE_LIBGL_FBOFORCETEX:-1}"
   export LIBGL_FB="${GUACAMELEE_LIBGL_FB:-1}"
-  HARDEXT_FIX="${GUACAMELEE_HARDEXT_LIB:-$GAMEDIR/compat/libgua_hardext_fix.so}"
+  # Production uses the source-patched gl4es capability profile. Keep the
+  # historical ARMHF interposer opt-in for diagnostics only.
+  HARDEXT_FIX="${GUACAMELEE_HARDEXT_LIB:-0}"
   if [ "$GUACAMELEE_HARDEXT_FIX" != "0" ] && [ ! -f "$HARDEXT_FIX" ]; then
     echo "Guacamelee hardext compatibility shim is missing"
     exit 2
+  fi
+  SDL_MODE_FIX="${GUACAMELEE_SDL_MODE_FIX:-$GAMEDIR/compat/libgua_sdl_mode_fix.so}"
+  if [ "$SDL_MODE_FIX" != "0" ] && [ ! -f "$SDL_MODE_FIX" ]; then
+    echo "Guacamelee SDL mode compatibility shim is missing"
+    exit 2
+  fi
+  if [ "$SDL_MODE_FIX" != "0" ]; then
+    export BOX86_LD_PRELOAD="$SDL_MODE_FIX${BOX86_LD_PRELOAD:+:$BOX86_LD_PRELOAD}"
   fi
   chmod 0755 "$GAMEDIR/box86/box86" "$GAMEDIR/gamedata/game-bin" "$LD"
 

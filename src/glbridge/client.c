@@ -522,12 +522,8 @@ const GLubyte *glGetString(GLenum name)
         "GL_OES_texture_float GL_OES_texture_half_float "
         "GL_EXT_texture_format_BGRA8888 GL_EXT_blend_minmax "
         "GL_EXT_discard_framebuffer GL_OES_compressed_ETC1_RGB8_texture "
-        "GL_EXT_texture_filter_anisotropic "
-        "GL_EXT_shader_framebuffer_fetch GL_OES_vertex_array_object "
-        "GL_OES_mapbuffer GL_EXT_map_buffer_range GL_EXT_multi_draw_arrays "
-        "GL_OES_texture_3D GL_OES_get_program_binary GL_OES_EGL_image "
-        "GL_OES_fbo_render_mipmap GL_OES_stencil8 GL_KHR_debug "
-        "GL_EXT_unpack_subimage GL_EXT_read_format_bgra";
+        "GL_OES_vertex_array_object GL_OES_mapbuffer GL_OES_EGL_image "
+        "GL_EXT_texture_format_BGRA8888 GL_EXT_read_format_bgra";
     uint32_t in = name;
     char buf[4096];
     memset(buf, 0, sizeof(buf));
@@ -574,19 +570,10 @@ const GLubyte *glGetStringi(GLenum name, GLuint index)
         "GL_EXT_blend_minmax",
         "GL_EXT_discard_framebuffer",
         "GL_OES_compressed_ETC1_RGB8_texture",
-        "GL_EXT_texture_filter_anisotropic",
-        "GL_EXT_shader_framebuffer_fetch",
         "GL_OES_vertex_array_object",
         "GL_OES_mapbuffer",
-        "GL_EXT_map_buffer_range",
-        "GL_EXT_multi_draw_arrays",
-        "GL_OES_texture_3D",
-        "GL_OES_get_program_binary",
         "GL_OES_EGL_image",
-        "GL_OES_fbo_render_mipmap",
-        "GL_OES_stencil8",
-        "GL_KHR_debug",
-        "GL_EXT_unpack_subimage",
+        "GL_EXT_texture_format_BGRA8888",
         "GL_EXT_read_format_bgra",
         NULL,
     };
@@ -1118,17 +1105,16 @@ static void send_client_arrays(GLint first, GLsizei count)
     if (bound_vao)
         return;
     for (i = 0; i < 16; ++i) {
-        unsigned stride, start, nb;
+        unsigned stride, start, nb, elem;
         const uint8_t *src;
         uint8_t *buf;
         uint32_t hdr[4];
         if (!attribs[i].enabled || attribs[i].is_offset)
             continue;
-        stride = attribs[i].stride
-                     ? (unsigned)attribs[i].stride
-                     : (unsigned)attribs[i].size * type_bytes(attribs[i].type);
+        elem = (unsigned)attribs[i].size * type_bytes(attribs[i].type);
+        stride = attribs[i].stride ? (unsigned)attribs[i].stride : elem;
         start = (unsigned)first * stride;
-        nb = (unsigned)count * stride;
+        nb = count > 0 ? ((unsigned)(count - 1) * stride + elem) : 0;
         if (!nb)
             continue;
         src = (const uint8_t *)(uintptr_t)attribs[i].ptr;

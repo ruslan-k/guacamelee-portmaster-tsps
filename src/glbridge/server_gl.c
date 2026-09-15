@@ -10,12 +10,65 @@ struct srv_attrib {
     uint32_t normalized;
     int32_t stride;
     int is_offset;
+    uint32_t source_buffer;
+    uint8_t enabled;
 };
+struct srv_vao {
+    uint32_t id;
+    uint32_t element_buffer;
+    struct srv_attrib attrib[16];
+};
+static struct srv_vao svao[32];
+static struct srv_vao *srv_current_vao;
 static struct srv_attrib sattr[16];
-static uint32_t scratch_vbo[16];
+static uint32_t srv_current_vao_id;
+static uint32_t scratch_vbo[16][3];
+static uint8_t scratch_slot[16];
 static uint32_t scratch_ibo;
 static uint32_t srv_bound_array;
 static uint32_t srv_bound_element;
+
+static uint64_t upload_hash(const uint8_t *p, uint32_t n)
+{
+    uint64_t h = 1469598103934665603ULL;
+    uint32_t i;
+    for (i = 0; i < n; ++i) {
+        h ^= p[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+static void classifier_rewrite(char *src, size_t *total)
+{
+    const char *mode = getenv("GUACAMELEE_FRAGMENT_CLASSIFIER");
+    const char *replacement;
+    char *line, *end;
+    size_t oldlen, newlen;
+    if (!mode || strcmp(mode, "0") == 0 ||
+        !strstr(src, "v_colour0") || !strstr(src, "texture2D"))
+        return;
+    if (strcmp(mode, "solid") == 0)
+        replacement = "gl_FragColor = vec4(1.0,0.0,1.0,1.0);";
+    else if (strcmp(mode, "texture") == 0)
+        replacement = "gl_FragColor = color;";
+    else if (strcmp(mode, "colour") == 0)
+        replacement = "gl_FragColor = v_colour0;";
+    else
+        return;
+    line = strstr(src, "gl_FragColor");
+    end = line ? strchr(line, '\n') : NULL;
+    if (!line || !end)
+        return;
+    oldlen = (size_t)(end - line);
+    newlen = strlen(replacement);
+    if (newlen > oldlen)
+        memmove(line + newlen, end, *total - (size_t)(end - src) + 1u);
+    else if (newlen < oldlen)
+        memmove(line + newlen, end, *total - (size_t)(end - src) + 1u);
+    memcpy(line, replacement, newlen);
+    *total = *total - oldlen + newlen;
+}
 
 static int need(uint32_t n, uint32_t have)
 {
@@ -450,7 +503,7 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
         }
         if (count > 1)
             total += (size_t)(count - 1);
-        src = malloc(total + sizeof(prefix) + 4);
+        src = malloc(total + sizeof(prefix) + 128);
         if (!src)
             return -1;
         p = in + 8;
@@ -501,6 +554,7 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
                 total = (size_t)nlen;
             }
         }
+        classifier_rewrite(src, &total);
         if (gl_diag_enabled() && final_dump < 8) {
             fprintf(stderr, "GUA-GL shader-final: id=%u bytes=%u\n%s\n",
                     shader, (unsigned)total, src);
@@ -541,6 +595,11 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
             return -1;
         size = (int32_t)u[1];
         data = (nbytes > 12) ? stage_blob(in, nbytes, 12) : NULL;
+        if (getenv("GUACAMELEE_INDEX_DIAG") && u[0] == GL_ELEMENT_ARRAY_BUFFER &&
+            size > 0 && nbytes >= 12u + (uint32_t)size)
+            fprintf(stderr, "GUA-EBO-DATA target=0x%x size=%d usage=0x%x "
+                    "hash=%016llx\\n", u[0], size, u[2],
+                    (unsigned long long)upload_hash(in + 12, (uint32_t)size));
         fn(u[0], (intptr_t)size, data, u[2]);
         return 0;
     }
@@ -626,6 +685,9 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
         sattr[index].normalized = u[3];
         sattr[index].stride = (int32_t)u[4];
         sattr[index].is_offset = (u[5] != 0xffffffffu);
+        sattr[index].source_buffer = srv_bound_array;
+        if (srv_current_vao)
+            memcpy(srv_current_vao->attrib, sattr, sizeof(sattr));
         if (sattr[index].is_offset)
             fn(index, sattr[index].size, sattr[index].type,
                (uint8_t)sattr[index].normalized, sattr[index].stride,
@@ -639,7 +701,8 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
         void (*vap)(uint32_t, int32_t, uint32_t, uint8_t, int32_t, const void *) =
             (void *)G.glVertexAttribPointer;
         void (*gen)(int32_t, uint32_t *) = G.glGenBuffers;
-        uint32_t index, nb;
+        uint32_t index, nb, slot;
+        const char *ring = getenv("GUACAMELEE_SCRATCH_RING");
         if (!need(16, nbytes) || !bind || !data || !vap || !gen)
             return -1;
         index = u[0];
@@ -648,9 +711,15 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
             return 0;
         if (nb > nbytes - 16)
             nb = nbytes - 16;
-        if (!scratch_vbo[index])
-            gen(1, &scratch_vbo[index]);
-        bind(GL_ARRAY_BUFFER, scratch_vbo[index]);
+        if (getenv("GUACAMELEE_FULL_PAYLOAD_DIAG") &&
+            (index == 0 || index == 2 || index == 4))
+            fprintf(stderr, "GUA-ATTR-FULL index=%u bytes=%u hash=%016llx\\n",
+                    index, nb,
+                    (unsigned long long)upload_hash(in + 16, nb));
+        slot = ring && strcmp(ring, "0") != 0 ? scratch_slot[index]++ % 3u : 0u;
+        if (!scratch_vbo[index][slot])
+            gen(1, &scratch_vbo[index][slot]);
+        bind(GL_ARRAY_BUFFER, scratch_vbo[index][slot]);
         data(GL_ARRAY_BUFFER, (intptr_t)nb, stage_blob(in, nbytes, 16),
              GL_STREAM_DRAW);
         vap(index, sattr[index].size ? sattr[index].size : 4, sattr[index].type,
@@ -675,8 +744,23 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
         uint32_t nb;
         if (!need(16, nbytes) || !fn)
             return -1;
+        if (srv_current_vao && srv_current_vao->element_buffer != 0)
+            srv_bound_element = srv_current_vao->element_buffer;
+        if (getenv("GUACAMELEE_INDEX_DIAG"))
+            fprintf(stderr, "GUA-DRAW-ELEMENTS mode=0x%x count=%u type=0x%x "
+                    "index=%x bound_element=%u input_bytes=%u\\n", u[0],
+                    u[1], u[2], u[3], srv_bound_element, nbytes);
         if (u[3] == 0xffffffffu) {
             nb = nbytes - 16;
+            if (getenv("GUACAMELEE_FULL_PAYLOAD_DIAG")) {
+                const uint8_t *idx = in + 16;
+                uint32_t first = nb >= 2 ? idx[0] | ((uint32_t)idx[1] << 8) : 0;
+                uint32_t last = nb >= 2 ? idx[nb - 2] | ((uint32_t)idx[nb - 1] << 8) : 0;
+                fprintf(stderr, "GUA-INDEX-FULL mode=0x%x count=%u type=0x%x "
+                        "bytes=%u hash=%016llx first=%u last=%u\\n", u[0],
+                        u[1], u[2], nb,
+                        (unsigned long long)upload_hash(idx, nb), first, last);
+            }
             if (!scratch_ibo && gen)
                 gen(1, &scratch_ibo);
             if (bind && data && scratch_ibo) {
@@ -749,8 +833,11 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
             return -1;
         if (u[0] == GL_ARRAY_BUFFER)
             srv_bound_array = u[1];
-        if (u[0] == GL_ELEMENT_ARRAY_BUFFER)
+        if (u[0] == GL_ELEMENT_ARRAY_BUFFER) {
             srv_bound_element = u[1];
+            if (srv_current_vao)
+                srv_current_vao->element_buffer = u[1];
+        }
         fn(u[0], u[1]);
         return 0;
     }
@@ -955,9 +1042,19 @@ static int tspgl_dispatch_special(uint32_t op, const uint8_t *in, uint32_t nbyte
     }
     case OP_glBindVertexArray: {
         void (*fn)(uint32_t) = (void *)G.glBindVertexArray;
+        uint32_t id;
         if (!need(4, nbytes) || !fn)
             return -1;
-        fn(u[0]);
+        id = u[0];
+        if (id < 32) {
+            if (svao[id].id == 0)
+                svao[id].id = id;
+            srv_current_vao_id = id;
+            srv_current_vao = &svao[id];
+            memcpy(sattr, srv_current_vao->attrib, sizeof(sattr));
+            srv_bound_element = srv_current_vao->element_buffer;
+        }
+        fn(id);
         return 0;
     }
     case OP_glIsVertexArray: {
