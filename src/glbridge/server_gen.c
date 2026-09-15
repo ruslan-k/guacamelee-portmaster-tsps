@@ -292,14 +292,46 @@ static int tspgl_dispatch_simple(uint32_t op, const uint32_t *u, uint32_t nbytes
         if (G.glFlush) G.glFlush();
         *out_n = 0;
         return 0;
-    case OP_glFramebufferRenderbuffer:
-        if (G.glFramebufferRenderbuffer) G.glFramebufferRenderbuffer(u[0], u[1], u[2], u[3]);
+    case OP_glFramebufferRenderbuffer: {
+        uint32_t renderbuffer = u[3];
+        if (unify_depth_stencil && u[1] == GL_DEPTH_ATTACHMENT &&
+            depth_stencil_rb != 0) {
+            renderbuffer = depth_stencil_rb;
+            fprintf(stderr,
+                    "GUA-FBO unify depth attachment rb=%u\\n",
+                    renderbuffer);
+        }
+        if (G.glFramebufferRenderbuffer)
+            G.glFramebufferRenderbuffer(u[0], u[1], u[2], renderbuffer);
         *out_n = 0;
         return 0;
-    case OP_glFramebufferTexture2D:
-        if (G.glFramebufferTexture2D) G.glFramebufferTexture2D(u[0], u[1], u[2], u[3], (int32_t)u[4]);
+    }
+    case OP_glFramebufferTexture2D: {
+        if (fbo_texture_fallback && u[1] == GL_COLOR_ATTACHMENT0 &&
+            u[2] == GL_TEXTURE_2D && u[3] != 0 && G.glTexImage2D &&
+            G.glBindTexture && G.glGetIntegerv) {
+            int32_t old_texture = 0;
+            void (*get_int)(uint32_t, int32_t *) =
+                (void *)G.glGetIntegerv;
+            void (*bind_tex)(uint32_t, uint32_t) =
+                (void *)G.glBindTexture;
+            void (*tex_image)(uint32_t, int32_t, int32_t, int32_t, int32_t,
+                              int32_t, uint32_t, uint32_t, const void *) =
+                (void *)G.glTexImage2D;
+            get_int(GL_TEXTURE_BINDING_2D, &old_texture);
+            bind_tex(GL_TEXTURE_2D, u[3]);
+            tex_image(GL_TEXTURE_2D, 0, GL_RGBA, game_w, game_h, 0,
+                      GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+            bind_tex(GL_TEXTURE_2D, (uint32_t)old_texture);
+            fprintf(stderr,
+                    "GUA-FBO texture fallback tex=%u -> %dx%d\\n",
+                    u[3], game_w, game_h);
+        }
+        if (G.glFramebufferTexture2D)
+            G.glFramebufferTexture2D(u[0], u[1], u[2], u[3], (int32_t)u[4]);
         *out_n = 0;
         return 0;
+    }
     case OP_glFrontFace:
         if (G.glFrontFace) G.glFrontFace(u[0]);
         *out_n = 0;
@@ -360,10 +392,38 @@ static int tspgl_dispatch_simple(uint32_t op, const uint32_t *u, uint32_t nbytes
         if (G.glReleaseShaderCompiler) G.glReleaseShaderCompiler();
         *out_n = 0;
         return 0;
-    case OP_glRenderbufferStorage:
-        if (G.glRenderbufferStorage) G.glRenderbufferStorage(u[0], u[1], (int32_t)u[2], (int32_t)u[3]);
+    case OP_glRenderbufferStorage: {
+        uint32_t format = u[1];
+        int32_t width = (int32_t)u[2];
+        int32_t height = (int32_t)u[3];
+        if (rb_format_fix && format == 0x8D48u) {
+            format = GL_DEPTH24_STENCIL8;
+            fprintf(stderr,
+                    "GUA-FBO format override 0x8d48 -> 0x%x\\n",
+                    format);
+        }
+        if (rb_zero_size && width == 0 && height == 0) {
+            width = game_w;
+            height = game_h;
+            fprintf(stderr,
+                    "GUA-FBO zero-rb override fmt=0x%x -> %dx%d\\n",
+                    format, width, height);
+        }
+        if (unify_depth_stencil && format == GL_DEPTH24_STENCIL8 &&
+            G.glGetIntegerv) {
+            void (*get_int)(uint32_t, int32_t *) =
+                (void *)G.glGetIntegerv;
+            int32_t current_rb = 0;
+            get_int(GL_RENDERBUFFER_BINDING, &current_rb);
+            depth_stencil_rb = (uint32_t)current_rb;
+            fprintf(stderr, "GUA-FBO depth-stencil rb=%u\\n",
+                    depth_stencil_rb);
+        }
+        if (G.glRenderbufferStorage)
+            G.glRenderbufferStorage(u[0], format, width, height);
         *out_n = 0;
         return 0;
+    }
     case OP_glSampleCoverage:
         if (G.glSampleCoverage) G.glSampleCoverage(tspgl_unpack_f32(u[0]), u[1]);
         *out_n = 0;

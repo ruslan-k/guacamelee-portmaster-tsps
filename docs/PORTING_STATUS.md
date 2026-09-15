@@ -9,7 +9,8 @@
 - The supplied 32-bit PortMaster package contains ARMHF Box86 and gl4es, but no GLES bridge or AArch64 presenter.
 - The bridge source is derived from the Galaxy on Fire 2 repository at commit `7471aaed0f3798a6556e7d16512f9e79a536b635`.
 - The bridge client and presenter compile with Zig 0.13 for ARMHF and AArch64 respectively.
-- `eglQuerySurface` now consumes bounded `TSPGL_WIDTH` and `TSPGL_HEIGHT` values instead of fixed 640x480 literals.
+- `eglQuerySurface` and the bridge defaults now use `1024x768`, matching the GOG SDL drawable; the shared frame maximum height is 768.
+- A controlled device A/B proved that the former 640x480 FBO cropped the 1024x768 game viewport and shifted the splash approximately 288 pixels to the right and upward. The production default is now 1024x768 letterboxed to 1280x720.
 
 ### Not yet confirmed
 
@@ -20,4 +21,4 @@
 
 ### First device hypothesis
 
-Use a 640x480 guest surface and letterbox it to the 1280x720 panel. If the presenter reaches readiness but the game fails before its first frame, preserve that log and classify the failure at the SDL video, gl4es, bridge, or Box86 boundary before changing resolution or audio.
+The initial 640x480 hypothesis is disproven for this SDL build. Use the 1024x768 guest surface and letterbox it to the 1280x720 panel. Keep 640x480 only as a controlled A/B override.

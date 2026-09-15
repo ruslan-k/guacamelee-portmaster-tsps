@@ -4,7 +4,7 @@
 #define NFSMW_FRAME_PATH "/tmp/nfsmw.frame"
 #define NFSMW_FRAME_MAGIC 0x4e465342u
 #define NFSMW_FRAME_MAX_W 1280
-#define NFSMW_FRAME_MAX_H 720
+#define NFSMW_FRAME_MAX_H 768
 #define NFSMW_FRAME_HDR 64
 #define NFSMW_FRAME_FILE_SIZE \
     (NFSMW_FRAME_HDR + (size_t)NFSMW_FRAME_MAX_W * (size_t)NFSMW_FRAME_MAX_H * 4u)
