@@ -83,28 +83,40 @@ i386 GLX NULL after fix:  PASS — NULL returned safely, no X11, swaps=120, live
 Guacamelee after fix:     FAIL at shader bootstrap — loose .\\Shaders\\vs_2d_main.vsh missing; no draw/swap
 ```
 
-The direct package now contains the tested Box64 NULL-display binary as primary, retains the pre-nullfix binary side-by-side, and does not expose the X11 stub by default. Production Box86/GLES bridge remains unchanged.
+The direct package now contains the tested Box64 NULL-display binary as primary plus two separately tested game-local i386 shims. It contains no paid `game-bin`, no pre-nullfix Box64, and no X11 stub. Production Box86/GLES bridge remains unchanged.
 
-## Latest post-NULL layout/shader classification
+## Latest affinity/layout/shader/FBO classification
 
-The original `gamedata/game-bin` and temporary colocated `game-bin.box32-direct` A/B were tested without modifying the original paid-data file. The only NOP is at file offset `0x858da3`, which disassembles to `pthread_attr_setaffinity_np@plt`; it is distinct from the `pthread_setschedprio` shim.
+The original `gamedata/game-bin` remains byte-for-byte unchanged:
 
-The colocated temporary binary, with the same validated Box64/gl4es/KMS stack, opened `shaders.dat.ogl`, resolved `vs_2d_main.vsh`, and produced shader compile/link/use activity. The original binary did not progress to this stage during the observation window. The temporary binary was deleted after testing and the original hash was unchanged.
+```text
+SHA-256 cfab463cab9f734588bae0a9c102be89699c747ed0e51235e384eb02cff08d6b
+offset 0x858da3: e8 08 b0 7a ff
+```
+
+Disassembly maps the five-byte NOP site to `pthread_attr_setaffinity_np@plt`. A separate AArch64 Box64 trace showed native affinity `rc=0`, but subsequent wrapped `pthread_create` returned `EINVAL` with guest thread handle zero. The i386 `libbox32_affinityshim.so` intercepted the guest symbol and changed every observed create to `rc=0` with a valid guest thread handle. Adding the existing sched shim reproduced the temporary NOP behavior on the original binary; the NOP is therefore retired from the package.
+
+The original binary plus both runtime shims opened `shaders.dat.ogl`, resolved `vs_2d_main.vsh`, and reached shader compile/link/use. Clean FBO baseline used `LIBGL_FBOFORCETEX=0`, with `LIBGL_FB` and `LIBGL_SHRINK` unset. Raw log SHA-256 is `f97770b8914ab27c9bed1f015b5e80e300f86ca017c7fbc7661289450d04038a`.
 
 ```text
 native strict KMS:       PASS — live magenta
 Box32 + gl4es probe:     PASS — live magenta
 i386 GLX NULL fix:       PASS — live magenta
-archive lookup:          PASS only in colocated NOP A/B
-shader source/compile:   PASS markers in colocated NOP A/B
-first game draw:         NOT PROVEN — DrawArrays=0, DrawElements=0
-first game swap:         NOT PROVEN as title frame — one swap marker
-FBO:                     GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT observed
-FMOD:                    driver 0 error 60; audible output NOT PROVEN
+affinity runtime shim:   PASS — original binary, creates rc=0
+archive lookup:          PASS — original binary + shims
+shader source/compile:   PASS markers
+FBO IDs observed:        1, 2, 3, 4, 5
+statuses:                0x8CD7 MISSING_ATTACHMENT (5x), 0x8CDD UNSUPPORTED (1x)
+DRAW binding:            1..5; READ binding: 0
+first game draw:         NOT PROVEN — BOX64_LOG=1 lacks complete runtime draw calls
+first game swap:         NOT PROVEN as title frame
+FMOD:                    driver 0 error 60; PCM write calls observed, audible output NOT PROVEN
 input/gameplay:          NOT TESTED
 ```
 
-The next blocker is the first game FBO/draw transition, not Box32, KMS, GLX NULL conversion, or shader archive presence. `fclose(NULL)` was not patched; it disappeared once the primary shader lookup succeeded.
+The FBO status is not yet classified as transient/persistent because the current log records application status and bindings but not attachment IDs/formats/order. It also cannot distinguish all draw entry points from symbol-resolution lines. The next diagnostic is a bounded observational FBO lifecycle trace, without consuming GL error state.
+
+The committed launcher now uses `cwd=$GAMEDIR/gamedata`, the original external `game-bin`, validates required archives, respects caller-provided `SDL_KMSDRM_REQUIRE_DRM_MASTER`, and preloads only the affinity+sched shims. The final ZIP manifest has no paid game executable or X11 stub.
 
 ## Cleanup evidence
 

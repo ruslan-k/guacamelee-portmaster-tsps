@@ -1,0 +1,78 @@
+# Box32 FBO sequence extraction
+
+Date: 2026-09-16
+Run: original `gamedata/game-bin` + affinity shim + sched shim
+Box64 trace log: `affinity-clean-fbo2.log`
+Raw log size: 1,030,677 bytes
+Raw log SHA-256: `f97770b8914ab27c9bed1f015b5e80e300f86ca017c7fbc7661289450d04038a`
+Environment: `LIBGL_FBOFORCETEX=0`; `LIBGL_FB` and `LIBGL_SHRINK` unset.
+
+## Ordered application-visible status sequence
+
+```text
+FBO check: m_tileFrameBuffer
+  DRAW_FRAMEBUFFER_BINDING=1
+  READ_FRAMEBUFFER_BINDING=0
+  status=GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT (0x8CD7)
+
+FBO check: m_tileFrameBuffer
+  DRAW_FRAMEBUFFER_BINDING=1
+  READ_FRAMEBUFFER_BINDING=0
+  status=GL_FRAMEBUFFER_UNSUPPORTED (0x8CDD)
+
+FBO check: SceneResolveFrameBuffer
+  DRAW_FRAMEBUFFER_BINDING=2
+  READ_FRAMEBUFFER_BINDING=0
+  status=GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT (0x8CD7)
+
+FBO check: Renderbuffer resolve
+  DRAW_FRAMEBUFFER_BINDING=3
+  READ_FRAMEBUFFER_BINDING=0
+  status=GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT (0x8CD7)
+
+FBO check: Renderbuffer resolve
+  DRAW_FRAMEBUFFER_BINDING=4
+  READ_FRAMEBUFFER_BINDING=0
+  status=GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT (0x8CD7)
+
+FBO check: Renderbuffer resolve
+  DRAW_FRAMEBUFFER_BINDING=5
+  READ_FRAMEBUFFER_BINDING=0
+  status=GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT (0x8CD7)
+```
+
+The game continued after these statuses and reached shader source/compile activity. It reported `glError 0x500` followed by repeated `0x506` from `SetConstants`.
+
+## Runtime draw census limitation
+
+The Box64 log at `BOX64_LOG=1` records GL symbol resolution but does not log every wrapped GL call. The following strings were resolved, not necessarily invoked as draw calls:
+
+```text
+glDrawArrays
+glDrawElements
+glDrawRangeElements
+glMultiDrawArrays
+glMultiDrawElements
+glDrawArraysInstanced
+glDrawElementsInstanced
+glDrawElementsBaseVertex
+glDrawRangeElementsBaseVertex
+```
+
+Therefore this log cannot prove a runtime draw count. No `GUA-DRAW` or equivalent application draw marker exists yet. The earlier `DrawArrays=0/DrawElements=0` count was only a grep over emitted wrapper calls and is not a complete draw census.
+
+## Classification
+
+The `0x8CD7` result is not immediately fatal: startup continues through archive, shader, and thread initialization. The `0x8CDD` transition on FBO 1 is a concrete unsupported-status event, but this log lacks attachment IDs/formats and cannot classify whether the transition is transient or persistent. The next diagnostic must instrument attachment lifecycle without consuming GL error state:
+
+```text
+Gen/Bind FBO
+Gen/Bind texture or renderbuffer
+storage dimensions/format
+FramebufferTexture2D / FramebufferRenderbuffer
+Check status
+first runtime draw-family call
+SDL_GL_SwapWindow
+```
+
+No FBO compatibility workaround was applied.

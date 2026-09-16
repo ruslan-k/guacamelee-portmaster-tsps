@@ -8,7 +8,7 @@ Pipeline:
 i386 Guacamelee -> AArch64 Box64 with BOX32 -> native wrapped SDL2/libGL -> AArch64 gl4es -> native EGL/GLES -> Mali
 ```
 
-The launcher is intended to be installed as a second temporary PortMaster menu entry. It shares the already extracted `gamedata/` but has its own log name. Remove the launcher and this directory to roll back.
+The launcher runs the original paid `gamedata/game-bin` from `gamedata/` beside `shaders.dat.ogl`, `resources.dat`, `misc.dat`, and `levels.dat`; no game executable or paid asset is included in this package. It shares the already extracted `gamedata/` but has its own log name. Remove the launcher and this directory to roll back.
 
 The current TSPS image was checked before preparing this experiment: `/usr/trimui/lib/libEGL.so.1` and `/usr/trimui/lib/libGLESv2.so.2` are absent, while the matching libraries are present under `/usr/lib/`. The launcher prefers the requested `/usr/trimui/lib` paths and records a fallback to `/usr/lib` only when the preferred file is absent.
 
@@ -26,5 +26,5 @@ Build provenance:
 
 - Box64: v0.4.5, upstream commit `f9d58352e937c8448a921f978b81da8cd86419c7`, rebuilt with `BOX32=ON`, `BOX32_BINFMT=OFF` using the repository's Spruce-derived `Dockerfile.64` (Ubuntu 20.04 multiarch, glibc 2.31, pinned CMake 3.22.6). Primary tested binary has SHA-256 `ac602ca9aac22aaad86951b6fb0a68a62f08b4ee9ffd7ff2823a946267fc2d00` and includes both independently reviewable Box64 patches.
 - gl4es: upstream commit `81547d986798e876de8b434193920b606a72363f`, AArch64 build from `~/Downloads/gl4es-aarch64-tsps.zip`, `NOX11=ON`, `GBM=OFF`, `DEFAULT_ES=2`, `USE_CLOCK=ON`, `GLX_STUBS=ON`, `EGL_WRAPPER=ON`. The archive's `libEGL-gl4es.so.1` remains an optional follow-up; the tested path uses system EGL/GLES.
-- The direct experiment includes an i386 `libbox32_schedshim.so` that overrides only `pthread_setschedprio()` to return success. It is isolated behind `BOX64_LD_PRELOAD`; the native Box32 wrapper otherwise deadlocked in that guest call before SDL/KMSDRM startup.
-- `src/x11stub.c` and the packaged AArch64 stub are retained as historical diagnostic artifacts only. The tested post-NULL-fix launcher does not require or expose the stub by default.
+- The direct experiment includes two separate i386 game-scoped compatibility shims. `libbox32_affinityshim.so` prevents the native affinity attr mutation that makes the following Box64 `pthread_create` return `EINVAL`; `libbox32_schedshim.so` overrides only the separately observed `pthread_setschedprio()` issue. Both are isolated behind `BOX64_LD_PRELOAD` and documented in `docs/diagnostics/box32-direct-affinity-wrapper.txt`.
+- `src/x11stub.c` remains a historical diagnostic artifact only. The tested post-NULL-fix launcher does not require or package an X11 stub.

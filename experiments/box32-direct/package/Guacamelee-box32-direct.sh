@@ -26,6 +26,8 @@ for candidate in \
 done
 [ -n "$GAMEDIR" ] || { echo "Guacamelee data directory not found" >&2; exit 1; }
 cd "$GAMEDIR" || exit 1
+DATADIR="$GAMEDIR/gamedata"
+cd "$DATADIR" || exit 1
 mkdir -p "$GAMEDIR/logs"
 LOG="$GAMEDIR/logs/box32-direct.log"
 [ -f "$LOG" ] && mv -f "$LOG" "$LOG.1" 2>/dev/null || true
@@ -40,15 +42,20 @@ echo "backend=box64-box32-aarch64-gl4es-direct"
 BOX64="${GUACAMELEE_BOX64:-$GAMEDIR/box32-direct/box64-box32-aarch64}"
 GL4ES="$GAMEDIR/box32-direct/libGL.so.1"
 SCHEDSHIM="$GAMEDIR/box32-direct/libbox32_schedshim.so"
+AFFINITYSHIM="$GAMEDIR/box32-direct/libbox32_affinityshim.so"
 X11STUB="$GAMEDIR/box32-direct/libX11.so.6"
-GAME="$GAMEDIR/box32-direct/game-bin"
+GAME="$DATADIR/game-bin"
 [ -x "$BOX64" ] || { echo "missing Box64/Box32: $BOX64"; exit 2; }
 [ -f "$GL4ES" ] || { echo "missing AArch64 gl4es: $GL4ES"; exit 3; }
 [ -f "$SCHEDSHIM" ] || { echo "missing Box32 sched shim: $SCHEDSHIM"; exit 4; }
+[ -f "$AFFINITYSHIM" ] || { echo "missing Box32 affinity shim: $AFFINITYSHIM"; exit 5; }
 if [ "${GUACAMELEE_USE_X11_STUB:-0}" = 1 ]; then
-  [ -f "$X11STUB" ] || { echo "missing direct X11 dlopen stub: $X11STUB"; exit 5; }
+  [ -f "$X11STUB" ] || { echo "missing direct X11 dlopen stub: $X11STUB"; exit 6; }
 fi
-[ -f "$GAME" ] || { echo "missing game-bin: $GAME"; exit 6; }
+[ -x "$GAME" ] || { echo "missing original game-bin: $GAME"; exit 7; }
+for asset in shaders.dat.ogl resources.dat misc.dat levels.dat; do
+  [ -f "$DATADIR/$asset" ] || { echo "missing archive: $DATADIR/$asset"; exit 8; }
+done
 
 NATIVE_EGL=/usr/trimui/lib/libEGL.so.1
 NATIVE_GLES=/usr/trimui/lib/libGLESv2.so.2
@@ -56,9 +63,12 @@ if [ ! -e "$NATIVE_EGL" ]; then NATIVE_EGL=/usr/lib/libEGL.so.1; fi
 if [ ! -e "$NATIVE_GLES" ]; then NATIVE_GLES=/usr/lib/libGLESv2.so.2; fi
 
 echo "box64=$BOX64"
+echo "pwd=$(pwd)"
 echo "game=$GAME"
+echo "game_sha256=$(sha256sum "$GAME" 2>/dev/null | cut -d" " -f1)"
+echo "shaders_dat_size=$(wc -c < "$DATADIR/shaders.dat.ogl" 2>/dev/null || true)"
 echo "BOX64_LIBGL=$GL4ES"
-echo "BOX64_LD_PRELOAD=$SCHEDSHIM"
+echo "BOX64_LD_PRELOAD=$AFFINITYSHIM:$SCHEDSHIM"
 echo "native_egl=$NATIVE_EGL"
 echo "native_gles=$NATIVE_GLES"
 echo "pipeline=NO_ARMHF NO_GLBRIDGE NO_PRESENTER"
@@ -73,11 +83,11 @@ export PORT_32BIT=Y
 export XDG_RUNTIME_DIR=/tmp
 export TMPDIR=/tmp
 export SDL_VIDEODRIVER="${GUACAMELEE_SDL_VIDEODRIVER:-KMSDRM}"
-export SDL_KMSDRM_REQUIRE_DRM_MASTER=0
+export SDL_KMSDRM_REQUIRE_DRM_MASTER="${SDL_KMSDRM_REQUIRE_DRM_MASTER:-0}"
 export SDL_VIDEO_GL_DRIVER="$GL4ES"
 export SDL_VIDEO_EGL_DRIVER="$NATIVE_EGL"
 export BOX64_LIBGL="$GL4ES"
-export BOX64_LD_PRELOAD="$SCHEDSHIM"
+export BOX64_LD_PRELOAD="$AFFINITYSHIM:$SCHEDSHIM"
 export BOX64_RESERVE_HIGH=0
 export BOX64_MMAP32=1
 export BOX32_PERSONA32BITS=1
