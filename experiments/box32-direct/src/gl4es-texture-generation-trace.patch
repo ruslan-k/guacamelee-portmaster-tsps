@@ -684,3 +684,76 @@ index 96e0720..31951c4 100644
                  DBG(printf("Binding %s/%s[%d]:Texture[%u] (sampler[%d]=%p)\n", PrintEnum(to_target(tgt)), PrintEnum(target), i, t, i, glstate->samplers.sampler[i]);)
                  gles_glBindTexture(GL_TEXTURE_2D, t);
                  glstate->actual_tex2d[i] = t;
+diff --git a/src/gl/uniform.c b/src/gl/uniform.c
+index 98b5614..d966a20 100644
+--- a/src/gl/uniform.c
++++ b/src/gl/uniform.c
+@@ -5,6 +5,7 @@
+ #include "glstate.h"
+ #include "loader.h"
+ #include "matvec.h"
++#include <stdio.h>
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -180,6 +181,7 @@ void GoUniformfv(program_t *glprogram, GLint location, int size, int count, cons
+         return;
+     }
+     m = kh_value(glprogram->uniform, k);
++    if ((glprogram->id == 21 || glprogram->id == 86 || glprogram->id == 2 || glprogram->id == 22 || glprogram->id == 18) && m) fprintf(stderr, "GUA-UNIFORM-F program=%u loc=%d name=%s type=0x%x size=%d count=%d v0=%.6g v1=%.6g v2=%.6g v3=%.6g\n", glprogram->id, location, m->name ? m->name : "?", m->type, size, count, value[0], (size > 1 ? value[1] : 0), (size > 2 ? value[2] : 0), (size > 3 ? value[3] : 0));
+     if(size != n_uniform(m->type) || !is_uniform_float(m->type) || count>m->size) {
+         errorShim(GL_INVALID_OPERATION);
+         return;
+@@ -197,12 +199,16 @@ void GoUniformfv(program_t *glprogram, GLint location, int size, int count, cons
+     LOAD_GLES2(glUniform3fv);
+     LOAD_GLES2(glUniform4fv);
+     if(gles_glUniform1fv) {
++        if (getenv("GUA_UNIFORM_ORIGIN_TRACE") && glprogram->id == 22 && (location == 2 || location == 3))
++            fprintf(stderr, "GUA-NATIVE-UNIFORM-F-CANDIDATE program=%u guest_loc=%d native_loc=%d size=%d count=%d v=(%.9g,%.9g,%.9g,%.9g)\\n", glprogram->id, location, m->id, size, count, value[0], size > 1 ? value[1] : 0, size > 2 ? value[2] : 0, size > 3 ? value[3] : 0);
+         switch (size) {
+             case 1: gles_glUniform1fv(m->id, count, value); break;
+             case 2: gles_glUniform2fv(m->id, count, value); break;
+             case 3: gles_glUniform3fv(m->id, count, value); break;
+             case 4: gles_glUniform4fv(m->id, count, value); break;
+         }
++        if (getenv("GUA_UNIFORM_ORIGIN_TRACE") && glprogram->id == 22 && (location == 2 || location == 3))
++            fprintf(stderr, "GUA-NATIVE-UNIFORM-F-RETURN program=%u guest_loc=%d native_loc=%d\\n", glprogram->id, location, m->id);
+         errorGL();
+     } else
+         errorShim(GL_INVALID_OPERATION);    // no GLLS hardware
+@@ -227,6 +233,7 @@ void GoUniformiv(program_t *glprogram, GLint location, int size, int count, cons
+         return;
+     }
+     m = kh_value(glprogram->uniform, k);
++    if ((glprogram->id == 21 || glprogram->id == 86 || glprogram->id == 2 || glprogram->id == 22 || glprogram->id == 18) && m) fprintf(stderr, "GUA-UNIFORM-I program=%u loc=%d name=%s type=0x%x size=%d count=%d v0=%d v1=%d v2=%d v3=%d\n", glprogram->id, location, m->name ? m->name : "?", m->type, size, count, value[0], (size > 1 ? value[1] : 0), (size > 2 ? value[2] : 0), (size > 3 ? value[3] : 0));
+     if(size != n_uniform(m->type) || !is_uniform_int(m->type)  || count>m->size) {
+         errorShim(GL_INVALID_OPERATION);
+         return;
+@@ -691,8 +698,27 @@ void GoUniformMatrix4fv(program_t *glprogram, GLint location, GLsizei count, GLb
+     // update uniform
+     memcpy((char*)glprogram->cache.cache + m->cache_offs, v, rsize);
+     LOAD_GLES2(glUniformMatrix4fv);
++    LOAD_GLES2(glGetIntegerv);
+     if (gles_glUniformMatrix4fv) {
++        GLint gua_native_before = -1, gua_native_after = -1, gua_native_by_name = -2;
++        if (getenv("GUA_NATIVE_STATE_TRACE")) {
++            if (gles_glGetIntegerv) gles_glGetIntegerv(GL_CURRENT_PROGRAM, &gua_native_before);
++            if (getenv("GUA_IMMEDIATE_NATIVE_ERROR") && glprogram->id == 22) {
++                LOAD_GLES2(glGetUniformLocation);
++                if (gles_glGetUniformLocation && m->name) gua_native_by_name = gles_glGetUniformLocation(glprogram->id, m->name);
++            }
++        }
++        if (getenv("GUA_UNIFORM_ORIGIN_TRACE") && glprogram->id == 22)
++            fprintf(stderr, "GUA-NATIVE-UNIFORM-CANDIDATE api=glUniformMatrix4fv program_guest=%u program_native=%u native_current_before=%d guest_loc=%d native_loc=%d count=%d transpose=%d m=(%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g)\\n", glprogram->id, glprogram->id, gua_native_before, location, m->id, count, transpose, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15]);
+         gles_glUniformMatrix4fv(m->id, count, GL_FALSE, v);
++        if (getenv("GUA_IMMEDIATE_NATIVE_ERROR") && glprogram->id == 22) {
++            LOAD_GLES2(glGetError);
++            GLenum gua_immediate_error = gles_glGetError ? gles_glGetError() : 0xffff;
++            fprintf(stderr, "GUA-NATIVE-UNIFORM-IMMEDIATE program=%u cached_loc=%d queried_loc=%d error=0x%x\\n", glprogram->id, m->id, gua_native_by_name, gua_immediate_error);
++        }
++        if (getenv("GUA_NATIVE_STATE_TRACE") && gles_glGetIntegerv) gles_glGetIntegerv(GL_CURRENT_PROGRAM, &gua_native_after);
++        if (getenv("GUA_UNIFORM_ORIGIN_TRACE") && glprogram->id == 22)
++            fprintf(stderr, "GUA-NATIVE-UNIFORM-RETURN api=glUniformMatrix4fv program_guest=%u native_loc=%d native_current_after=%d\\n", glprogram->id, m->id, gua_native_after);
+         errorGL();
+     } else {
+         //printf("No GLES2 function\n");
