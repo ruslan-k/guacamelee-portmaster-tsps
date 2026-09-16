@@ -417,8 +417,50 @@ index a917658..8a0427a 100644
  
  void APIENTRY_GL4ES gl4es_glDrawBuffers(GLsizei n, const GLenum *bufs);
  void APIENTRY_GL4ES gl4es_glNamedFramebufferDrawBuffers(GLuint framebuffer, GLsizei n, const GLenum *bufs);
+diff --git a/src/gl/program.c b/src/gl/program.c
+index 2eaeb02..e0fc1d0 100644
+--- a/src/gl/program.c
++++ b/src/gl/program.c
+@@ -10,6 +10,13 @@
+ #include "loader.h"
+ #include "shaderconv.h"
+ #include "fpe_shader.h"
++#include <stdio.h>
++
++static unsigned gua_program_trace_events;
++#define GUA_PROGRAM_TRACE(fmt, ...) do { \
++    if (gua_program_trace_events < 256) \
++        fprintf(stderr, "GUA-PROGRAM n=%u " fmt "\n", ++gua_program_trace_events, ##__VA_ARGS__); \
++} while (0)
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -43,6 +50,7 @@ void APIENTRY_GL4ES gl4es_glAttachShader(GLuint program, GLuint shader) {
+         glprogram->last_vert = glshader;
+     else if(glshader->type==GL_FRAGMENT_SHADER && !glprogram->last_frag)
+         glprogram->last_frag = glshader;
++    fprintf(stderr, "GUA-ATTACH program=%u shader=%u type=0x%x attach_size=%d last_vert=%u last_frag=%u\\n", glprogram->id, glshader->id, glshader->type, glprogram->attach_size, glprogram->last_vert ? glprogram->last_vert->id : 0, glprogram->last_frag ? glprogram->last_frag->id : 0);
+     // send to hadware
+     LOAD_GLES2(glAttachShader);
+     if(gles_glAttachShader) {
+@@ -806,6 +814,7 @@ void APIENTRY_GL4ES gl4es_glLinkProgram(GLuint program) {
+         noerrorShim();
+     }
+     glprogram->linked = 1;
++    GUA_PROGRAM_TRACE("LINK guest=%u native=%u linked=%d", program, glprogram->id, glprogram->linked);
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glUseProgram(GLuint program) {
+@@ -822,6 +831,7 @@ void APIENTRY_GL4ES gl4es_glUseProgram(GLuint program) {
+ 
+     glstate->glsl->program=glprogram->id;
+     glstate->glsl->glprogram=glprogram;
++    GUA_PROGRAM_TRACE("USE guest=%u native=%u linked=%d", program, glprogram->id, glprogram->linked);
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glValidateProgram(GLuint program) {
 diff --git a/src/gl/shader.c b/src/gl/shader.c
-index 0bde8f1..34e3b18 100644
+index 0bde8f1..24904b0 100644
 --- a/src/gl/shader.c
 +++ b/src/gl/shader.c
 @@ -7,6 +7,13 @@
@@ -443,12 +485,13 @@ index 0bde8f1..34e3b18 100644
              if(status!=GL_TRUE) {
                  printf("LIBGL: Error while compiling shader %d. Original source is:\n%s\n=======\n", glshader->id, glshader->source);
                  printf("ShaderConv Source is:\n%s\n=======\n", glshader->converted);
-@@ -169,6 +177,8 @@ void APIENTRY_GL4ES gl4es_glShaderSource(GLuint shader, GLsizei count, const GLc
+@@ -169,6 +177,9 @@ void APIENTRY_GL4ES gl4es_glShaderSource(GLuint shader, GLsizei count, const GLc
          for (int i=0; i<count; i++)
              strcat(glshader->source, string[i]);
      }
 +    if (shader == 19 || shader == 20)
 +        fprintf(stderr, "GUA-SHADER-SOURCE shader=%u len=%d src=%.*s\\n", shader, l, l > 600 ? 600 : l, glshader->source);
++    fprintf(stderr, "GUA-SHADER-CLASS shader=%u type=0x%x len=%d pos=%d zero_pos=%d tex2d=%d vMult=%d converted_len=%d\\n", shader, glshader->type, l, strstr(glshader->source, "gl_Position") != NULL, strstr(glshader->source, "gl_Position = vec4(0.0") != NULL, strstr(glshader->source, "texture2D") != NULL, strstr(glshader->source, "vMult") != NULL, glshader->converted ? (int)strlen(glshader->converted) : 0);
      LOAD_GLES2(glShaderSource);
      if (gles_glShaderSource) {
          // adapt shader if needed (i.e. not an es2 context and shader is not #version 100)
