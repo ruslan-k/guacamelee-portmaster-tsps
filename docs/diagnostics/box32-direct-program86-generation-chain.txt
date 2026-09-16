@@ -1,0 +1,85 @@
+Guacamelee Box32 direct — program86 generation chain
+Date: 2026-09-17
+
+Exact chain from the positive 25-second combined generation/readback run:
+
+  BLIT writer seq=424 kind=BLIT
+    fbo=2
+    texture logical=2 gen=1
+    ptr=0x60cabd10
+    native glname=2
+
+  GUA-SOURCE-AFTER-WRITER
+    logical FBO=2, draw=2, read=1, native=2
+    rgba=0,0,0,255
+
+  P86 sampler snapshot immediately before draw:
+    program=86
+    unit=0
+    logical=2
+    gen=1
+    ptr=0x60cabd10
+    glname=2
+    alive=1
+    last_writer=BLIT
+    last_writer_seq=424
+    writer_fbo=2
+
+  other P86 sampler snapshots:
+    unit=1 logical=26 gen=1 ptr=0x617f4e70 glname=26 alive=1
+    unit=2 logical=82 gen=1 ptr=0x61a02230 glname=82 alive=1
+
+The exact sampler0 object and the FBO2 BLIT destination object match:
+
+  logical=2, generation=1, pointer=0x60cabd10, native glname=2
+
+No delete/recreate occurred for this generation in the captured run. The source
+pixel is already black immediately after the BLIT writer. This excludes an
+intervening clear/draw as the required explanation for the first black output.
+
+The older `actual=83` field was a cached/native-realization state label, not the
+`gltexture_t->glname` field. The new trace prints these identities separately.
+
+Required classification
+-----------------------
+P86_SAMPLER0_OBJECT_MATCH=YES
+P86_SAMPLER0_ALIVE=YES
+P86_SAMPLER0_LAST_WRITER=BLIT
+P86_SAMPLER0_LAST_WRITER_SEQ=424
+P86_SAMPLER0_SOURCE_BLACK_REASON=BLIT destination texture2 is already black immediately after the BLIT; upstream source content is not yet classified
+
+What is proven and what is not
+------------------------------
+Proven:
+- logical texture2 generation1 remains alive;
+- FBO2 attachment and P86 sampler0 refer to the same diagnostic object;
+- native glname is 2 for both references;
+- BLIT is the last recorded writer;
+- source readback immediately after that writer is black.
+
+Not proven:
+- native `GL_TEXTURE_BINDING_2D` queried independently after switching/restoring
+  native active unit; this was intentionally not added to avoid query-side state
+  perturbation;
+- whether the FBO1 source/read object contains non-black pixels before BLIT;
+- whether black is intentional application state or an upstream render-target
+  population failure;
+- a deleted/reused generation or stale mapping bug.
+
+The short follow-up verification run did not reach P86 before its timeout and is
+rejected as runtime evidence (sample=0, writer=0, SIGSEGV=0). The positive run is:
+
+  /mnt/external/Hermes/guac-combo-runtime.log
+  SHA-256 bd945d43462a70eaf184bb3b2b2dc4fa09851bbc8dfc28ffcbf4908d5e9fb0c4
+  size 812392 bytes
+
+Build/restoration
+-----------------
+The tracer built successfully. After the positive run, the latest diagnostic
+runtime was restored and read back:
+
+  libGL SHA-256 37fe3fe0d86ace2bb1b746846396c48f788b6d8d3bfb5f53887accc6c78cf1a8
+  Box64 SHA-256 6f55a18f5e3f5eaadd293b046e1428f4aca7bd50ce6462ceffc11a4fca4849d5
+
+No production launcher, game binary, input, audio, presenter, or ARMHF bridge
+was modified.
