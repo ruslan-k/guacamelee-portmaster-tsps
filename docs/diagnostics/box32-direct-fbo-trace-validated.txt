@@ -8,7 +8,7 @@ Trace library SHA-256: `a797110d8ee8b94f281a50c10add054c144785061e57e65b29dc0b04
 Raw log: `fbo-live.log`
 Raw log SHA-256: `63977072055183d75a5c56bb15f5cfd4d94ceea4c9bad555abe9ad9fbffe9c2b`
 Framebuffer capture: `fbo-live.png`, 1280x720 PNG
-Capture SHA-256: `$(sha256sum /mnt/external/Hermes/fbo-live.png | cut -d" " -f1)`
+Capture SHA-256: `f0e30427ce8315288dd5013786997aeefe516032deac98bbf03a22c185278cfa`
 
 ## Execution
 

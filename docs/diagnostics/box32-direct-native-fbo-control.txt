@@ -1,0 +1,56 @@
+# Native FBO control — Phase 1
+
+Device: TSPS / Longan
+Probe: `native_fbo_probe` (AArch64), SHA-256 `435315fe7da37b16537a75950abf6b3a8efab40ad4a6377243fd22634f3e19f4`
+Raw log: `native-fbo-control.log`
+Raw log SHA-256: `2b9161330f4e854a86d1576a440bca590f637c27964b13beefd778009c6a6e36`
+
+Native-only strict KMS run: no Box32, no gl4es, no X11 stub.
+
+Observed:
+
+```text
+SDL driver KMSDRM
+mode 1280x720@60
+window 1280x720 / drawable 1280x720
+GL vendor ARM
+GL renderer Mali-G57
+GL version OpenGL ES 3.2
+```
+
+Extensions:
+
+```text
+GL_OES_rgb8_rgba8=yes
+GL_OES_packed_depth_stencil=yes
+GL_EXT_packed_depth_stencil=no
+GL_OES_depth24=yes
+GL_OES_depth_texture=yes
+```
+
+Recipe A — RGBA8 renderbuffer 1280x720 attached to COLOR0:
+
+```text
+storage err=0
+attachment type=0x8d41 name=1 width=1280 height=720 format=0x8058
+status=0x8cd5 GL_FRAMEBUFFER_COMPLETE
+```
+
+Recipe B — same native D24S8 renderbuffer attached to DEPTH and STENCIL:
+
+```text
+storage err=0
+DEPTH type=0x8d41 name=2 width=1280 height=720 format=0x88f0
+STENCIL type=0x8d41 name=2 width=1280 height=720 format=0x88f0
+status=0x8cd5 GL_FRAMEBUFFER_COMPLETE
+```
+
+Recipe C — RGBA 1280x720 level-0 texture with data=NULL attached to COLOR0:
+
+```text
+TexImage err=0
+attachment type=0x1702 GL_TEXTURE name=1
+status=0x8cd5 GL_FRAMEBUFFER_COMPLETE
+```
+
+Conclusion: native Mali accepts all three relevant recipes. Continue with gl4es mapping/state investigation; do not switch to native fallback formats yet.

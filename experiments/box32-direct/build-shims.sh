@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
-# Build reproducible diagnostic shims in a Debian/Ubuntu cross-toolchain.
-# Run from this directory with the repository root as the working directory.
+# Build reproducible game-scoped i386 compatibility shims.
 OUT=${1:-build}
 mkdir -p "$OUT"
 
@@ -9,11 +8,12 @@ i686-linux-gnu-gcc -m32 -shared -fPIC -nostdlib \
   -Wl,-soname,libbox32_schedshim.so \
   -o "$OUT/libbox32_schedshim.so" src/schedshim.c
 
-aarch64-linux-gnu-gcc -shared -fPIC \
-  -Wl,-soname,libX11.so.6 \
-  -o "$OUT/libX11.so.6" src/x11stub.c
+i686-linux-gnu-gcc -m32 -shared -fPIC -nostdlib \
+  -Wl,-soname,libbox32_affinityshim.so \
+  -o "$OUT/libbox32_affinityshim.so" src/affinityshim.c
 
-file "$OUT/libbox32_schedshim.so" "$OUT/libX11.so.6"
-readelf -h "$OUT/libbox32_schedshim.so" | grep -E 'Class|Machine'
-readelf -h "$OUT/libX11.so.6" | grep -E 'Class|Machine'
-sha256sum "$OUT/libbox32_schedshim.so" "$OUT/libX11.so.6"
+file "$OUT/libbox32_schedshim.so" "$OUT/libbox32_affinityshim.so"
+readelf -h "$OUT/libbox32_schedshim.so" "$OUT/libbox32_affinityshim.so" | grep -E 'Class|Machine'
+readelf -Ws "$OUT/libbox32_schedshim.so" | grep -E 'pthread_setschedprio$'
+readelf -Ws "$OUT/libbox32_affinityshim.so" | grep -E 'pthread_attr_setaffinity_np$'
+sha256sum "$OUT/libbox32_schedshim.so" "$OUT/libbox32_affinityshim.so"
