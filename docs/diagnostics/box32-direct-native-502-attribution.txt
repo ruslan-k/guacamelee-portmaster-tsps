@@ -1,0 +1,72 @@
+Guacamelee Box32 direct — native 0x502 attribution
+Date: 2026-09-17
+
+NATIVE_502_PRODUCER=glUniformMatrix4fv
+
+Build/runtime
+-------------
+- gl4es pinned: 81547d986798e876de8b434193920b606a72363f
+- clean native attribution libGL: built from pinned source plus diagnostic patches
+- Box64 clean swap-only SHA-256:
+  b81cf2e19250d97028a2cdf8b3e45efba88a157f76defda1d2cc63a3498720be
+- clean error-origin run had readback OFF and direct-present OFF
+- final attribution run used GUA_NATIVE_STATE_TRACE=1 and BOX64_LOG=0
+- no rebind A/B was applied
+
+Evidence
+--------
+Raw attribution runtime:
+  /mnt/external/Hermes/guac-attrib-runtime.log
+SHA-256:
+  893dfa704431cbbc6e90f3e6b18170c25d86bbdff97d000051395e3934df6739
+size: 637134 bytes
+
+Native state immediately around the matrix call:
+
+  GUA-NATIVE-UNIFORM-CANDIDATE
+  program_guest=22 program_native=22
+  native_current_before=22
+  guest_loc=1 native_loc=1 count=1 transpose=0
+  m=(0.75,0,0,0,0,1,0,0,0,0,0.000500049966,0,0,0.5,0.000400039979,1)
+
+  GUA-NATIVE-UNIFORM-RETURN
+  program_guest=22 native_loc=1 native_current_after=22
+
+The matrix is finite and native current program is already 22. Therefore:
+
+  PROGRAM_SHADOW_DESYNC: not proven; in-run state says false
+  STALE_UNIFORM_LOCATION: not proven; guest/native location both 1
+  rebind A/B: intentionally not run
+
+The following program22 loc2 call is logged as vAdd=(0,0,0,0), but its cache
+is unchanged and it does not call native GLES. The next observed app glGetError
+returns:
+
+  returned=0x502 source=native type_before=0 shim_before=0x0
+  native_read=0x502 purge_read=0x0 program=22 current_fbo=0 draw_fbo=0 read_fbo=1
+
+No GUA-SHIM-ERROR-LATCH occurred. Since the matrix call is the last native
+uniform call before the error is consumed, and native current/location/type/count
+are valid, the best evidence classification is the matrix native call itself.
+A native immediate error read was deliberately not inserted because it would
+consume/change the original app-visible error semantics.
+
+Required interpretation
+-----------------------
+- The error is not pixel-readback contamination: it reproduces with readback OFF.
+- It is not direct-present contamination: direct-present is OFF.
+- It is not a proven program shadow mismatch.
+- It is not a proven stale location.
+- No compatibility fix is justified yet; do not force rebind or rewrite uniforms.
+
+Restoration
+-----------
+The latest diagnostic runtime was restored after the test and read back:
+
+  libGL.so.1
+  37fe3fe0d86ace2bb1b746846396c48f788b6d8d3bfb5f53887accc6c78cf1a8
+
+  box64-box32-aarch64
+  6f55a18f5e3f5eaadd293b046e1428f4aca7bd50ce6462ceffc11a4fca4849d5
+
+No production launcher or game binary was modified.

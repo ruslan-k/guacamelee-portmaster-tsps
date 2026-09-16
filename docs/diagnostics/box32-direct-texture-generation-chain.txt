@@ -1,0 +1,61 @@
+Guacamelee Box32 direct — texture/FBO generation chain status
+Date: 2026-09-17
+
+This report records the proven numeric/object relationships and explicitly marks
+the missing persistent generation metadata. No texture mapping or lifecycle fix
+was applied.
+
+Input chain
+-----------
+- program86 sampler0 guest/native texture=2/2 at the first causal black draw
+- texture2 storage: 1280x720, internal/format=0x1908, type=0x1401, data=NULL
+- texture2 is attached as FBO2 color0; FBO2 check status=0x8cd5
+- FBO1/FBO2 resolve path is logged as read=1, draw=2, guest_tex=1/native_tex=1
+- program86 realization repeatedly binds guest2/native2, with actual native binding
+  observed as 83 in the first cycle and later native bindings changing as objects
+  are realized; this is an observation, not proof of stale mapping
+
+Relevant observed events
+------------------------
+- texture guest/native 2/2 created/uploaded as 1280x720 render-target storage
+- attachment state for logical FBO2: color0 guest/native texture 2/2
+- status: GL_FRAMEBUFFER_COMPLETE (0x8cd5)
+- program86 sampler0 realization: guest/native 2/2
+- program86 BEFORE at transition: 109,167,160,255
+- program86 AFTER at transition: 0,0,0,255
+
+Missing proof
+-------------
+The current diagnostic build does not yet maintain a side table with:
+
+  texture generation, object pointer, create/delete sequence,
+  last CPU upload, last GPU writer, writer program generation, writer FBO generation
+
+Therefore the following are NOT claimed:
+
+  sampler uses deleted/reused generation: NOT PROVEN
+  stale native texture mapping: NOT PROVEN
+  expected writer targets A while sampler reads B: NOT PROVEN
+
+The numeric chain is compatible with two explanations:
+
+1. expected behavior: texture2/FBO2 is black before program86, so program86 correctly
+   writes black; or
+2. an unproven lifetime/binding issue causes program86 to read a different native
+   texture than the logical render target.
+
+The next implementation should add trace-only texture/FBO generation metadata and
+last-writer events, then print the chain at program18/program86 sampler use. It must
+not alter lookup, binding, FBO attachment, or presenter semantics.
+
+Raw source of observations
+--------------------------
+- transition log: /mnt/external/Hermes/guac-transition-runtime.log
+  SHA-256 e22498852c7d79969467029c78df6791eea45d9b53e2db4916f104c998fc355d
+- readback log: /mnt/external/Hermes/guac-readback2-runtime.log
+  SHA-256 d3f29f0b2c42e1c9183395ab31d3092a8c81ed356494f6fc8052f0acec71772e
+
+Restoration
+-----------
+Latest diagnostic runtime remained installed after readback testing and was
+verified independently; production launcher/game data were not changed.

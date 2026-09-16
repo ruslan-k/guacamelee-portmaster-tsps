@@ -1,0 +1,54 @@
+Guacamelee Box32 direct — program18 attribute boundary
+Date: 2026-09-17
+
+Build
+-----
+- gl4es pinned: 81547d986798e876de8b434193920b606a72363f
+- readback/attribute diagnostic build; semantics unchanged
+- Box64 clean swap-only: b81cf2e19250d97028a2cdf8b3e45efba88a157f76defda1d2cc63a3498720be
+- raw attribute runtime: /mnt/external/Hermes/guac-attr-runtime.log
+- raw log SHA-256: ab1e1bfcb01b95a801e276ab42baa067445c84d3d8e532d3694fa2e54295eb29
+
+Observed gl4es game-facing attribute contract for program18:
+
+  GUA-GL4ES-ATTRIB-IN index=0 size=2 type=0x1406 normalized=0 stride=20
+    pointer=0xf1d01010 vbo=NULL enabled=1 integer=0
+  GUA-GL4ES-ATTRIB-IN index=2 size=4 type=0x1401 normalized=1 stride=20
+    pointer=0xf1d01018 vbo=NULL enabled=1 integer=0
+  GUA-GL4ES-ATTRIB-IN index=4 size=2 type=0x1406 normalized=0 stride=20
+    pointer=0xf1d0101c vbo=NULL enabled=1 integer=0
+
+The selected program18 draw is indexed GL_TRIANGLES, count=6, len=6.
+The stored color bytes at the six referenced records are all:
+
+  00 00 00 e2
+
+The gl4es draw decoder reports normalized=1 for the UBYTE color attribute,
+therefore the decoded color is (0,0,0,226/255). This is consistent between the
+raw client-array observation and the decoded values; no evidence of non-zero raw
+bytes becoming zero at this boundary was found.
+
+The position/color records use the same 20-byte stride and offsets 0 and 8:
+
+  position pointer = base + 0
+  color pointer    = base + 8
+  stride           = 20
+
+The attribute map is not yet shader-name-complete; the program18 fragment path
+is known from the earlier shader trace as shader17 and consumes v_colour0.
+No white-color forcing, shader rewrite, or conversion change was made.
+
+Control
+-------
+A natural program2 draw in the same native path has color=(255,255,255,255)
+and produces a non-black covered center pixel. This rules out a universal color
+conversion failure. The current evidence favors application-provided black/fade
+color for program18, but a Box64 generated-wrapper-side trace of the original
+argument presentation remains optional if exact guest ABI provenance is required.
+
+Restoration
+-----------
+Latest diagnostic libGL and Box64 were restored and SHA-verified:
+
+  libGL 37fe3fe0d86ace2bb1b746846396c48f788b6d8d3bfb5f53887accc6c78cf1a8
+  Box64 6f55a18f5e3f5eaadd293b046e1428f4aca7bd50ce6462ceffc11a4fca4849d5
