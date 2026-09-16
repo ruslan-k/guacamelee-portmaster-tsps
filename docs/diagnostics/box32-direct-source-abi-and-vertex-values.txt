@@ -1,0 +1,106 @@
+# Box32 direct source ABI and vertex-value boundary
+
+Date: 2026-09-17
+Device: TSPS / Longan / AArch64
+
+## Scope
+
+Diagnostic-only Box64 and gl4es builds. Production launcher and production runtime were not changed.
+
+## Box64 glShaderSource ABI result
+
+Instrumented `my32_glShaderSource` in Box64 with bounded segment tracing.
+
+For shader16:
+
+- `count=1`
+- `length=-1`
+- guest pointer and converted host pointer were valid;
+- `strlen=1165` at the Box64 wrapper;
+- complete source tail was present, including:
+  - `gl_Position.xy = in_position0.xy;`
+  - `gl_Position.z = 0.0;`
+  - `gl_Position.w = 1.0;`
+  - `v_texcoord0 = in_texcoord0;`
+  - `v_texcoord1` assignments;
+  - closing brace.
+
+Therefore shader16 source truncation is not a Box32/Box64 pointer-array ABI failure.
+
+Box64 ABI-trace binary SHA-256:
+
+`6f55a18f5e3f5eaadd293b046e1428f4aca7bd50ce6462ceffc11a4fca4849d5`
+
+Raw ABI log SHA-256:
+
+`1b54c582efdd763c7dfbf98ae905f431cb87c61cdcc82416b68e1dabdd5e5438`
+
+## Texture realization result
+
+For the first `program=86` content/postprocess draw, `realize_textures(1)` emitted native binds:
+
+- unit 0: guest/native texture 2;
+- unit 1: guest/native texture 26;
+- unit 2: guest/native texture 90.
+
+Deferred texture realization is therefore not the blocker.
+
+## Shader classification
+
+`program=86` attaches:
+
+- vertex shader16;
+- fragment shader33.
+
+Shader33 samples `sampler0` as the main image, `sampler1` as distortion, and `sampler2` as light map. Program86 receives non-zero world/vignette uniforms and enabled vertex attributes, but its main source texture is a render-target texture with no uploaded data in the tested black path.
+
+Fragment shader2 is texture-independent:
+
+```glsl
+gl_FragColor = v_colour0 + v_texcoord0 + vec4(1.0);
+```
+
+## Vertex pointer/value result
+
+Added bounded pointer and first-value tracing to `GUA-DRAW`.
+
+Program86:
+
+```text
+attrib0 size=2 type=GL_FLOAT stride=20
+first position = (-1, -1)
+attrib2 color = (255,255,255,255)
+buffer=NULL, real_buffer=0
+```
+
+This is valid fullscreen-quad input. It excludes missing client-array pointer, absent VBO, and zero position as the cause of program86's black output.
+
+Program2:
+
+```text
+attrib0 size=3 type=GL_FLOAT stride=24
+first position = (-18.5222, 18.5204)
+attrib2 color = (0,0,0,255)
+buffer=NULL, real_buffer=0
+```
+
+Program2's first vertex is outside normal clip coordinates, but this is a separate pass and is not sufficient to explain the entire frame because program86 has valid fullscreen coordinates.
+
+Vertex-value log SHA-256:
+
+`bff8bbab564c3af106bc1419f12a745fe65df1cb2eefcf3c92ca274d409b6cb8`
+
+## Current conclusion
+
+The following hypotheses are excluded or weakened:
+
+- Box32 `glShaderSource` pointer conversion truncation: excluded for shader16;
+- deferred texture-unit realization: excluded;
+- missing VBO/client pointer: excluded for program86;
+- program86 zero-position geometry: excluded.
+
+The remaining boundary is before or during creation/population of the source render-target texture used by program86, or in the earlier scene pass that should populate it. The next diagnostic should trace the first non-postprocess scene draw into the source FBO, including draw target, shader program, viewport, vertex values, texture uploads, and pixel sample before program86 reads the target.
+
+## Cleanup
+
+The diagnostic game/Box64 process was stopped by exact PID after the run. Temporary diagnostic binaries were removed from TSPS. MainUI/principal state was not modified by the diagnostic run.
