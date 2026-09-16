@@ -1,0 +1,194 @@
+diff --git a/src/gl/drawing.c b/src/gl/drawing.c
+index 498ecc5..6e002d7 100644
+--- a/src/gl/drawing.c
++++ b/src/gl/drawing.c
+@@ -9,6 +9,16 @@
+ #include "list.h"
+ #include "loader.h"
+ #include "render.h"
++#include "framebuffers.h"
++#include <stdio.h>
++
++static unsigned gua_draw_trace_events;
++#define GUA_SAFE_F(P, I) (((uintptr_t)(P) > 0x10000) ? ((const float*)(P))[I] : 0.0f)
++#define GUA_SAFE_C(P, I) (((uintptr_t)(P) > 0x10000) ? ((const unsigned char*)(P))[I] : 0)
++#define GUA_DRAW_TRACE(fmt, ...) do { \
++    if (gua_draw_trace_events < 256) \
++        fprintf(stderr, "GUA-DRAW n=%u " fmt "\n", ++gua_draw_trace_events, ##__VA_ARGS__); \
++} while (0)
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -285,6 +295,31 @@ GLuint len_indices(const GLushort *sindices, const GLuint *iindices, GLsizei cou
+ }
+ 
+ static void glDrawElementsCommon(GLenum mode, GLint first, GLsizei count, GLuint len, const GLushort *sindices, const GLuint *iindices, int instancecount) {
++    GUA_DRAW_TRACE("COMMON mode=0x%x first=%d count=%d len=%u instances=%d logical_fbo=%u program=%u attrib0=%d/%d/%d/%d attrib1=%d/%d/%d/%d attrib2=%d/%d/%d/%d attrib3=%d/%d/%d/%d p0=%p rp0=%p b0=%p rb0=%u p1=%p rp1=%p b1=%p rb1=%u p2=%p rp2=%p b2=%p rb2=%u v0=%.6g,%.6g,%.6g,%.6g c0=%u,%u,%u,%u", mode, first, count, len, instancecount, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, glstate->glsl ? glstate->glsl->program : 0, glstate->vao->vertexattrib[0].enabled, glstate->vao->vertexattrib[0].size, glstate->vao->vertexattrib[0].type, glstate->vao->vertexattrib[0].stride, glstate->vao->vertexattrib[1].enabled, glstate->vao->vertexattrib[1].size, glstate->vao->vertexattrib[1].type, glstate->vao->vertexattrib[1].stride, glstate->vao->vertexattrib[2].enabled, glstate->vao->vertexattrib[2].size, glstate->vao->vertexattrib[2].type, glstate->vao->vertexattrib[2].stride, glstate->vao->vertexattrib[3].enabled, glstate->vao->vertexattrib[3].size, glstate->vao->vertexattrib[3].type, glstate->vao->vertexattrib[3].stride, glstate->vao->vertexattrib[0].pointer, glstate->vao->vertexattrib[0].real_pointer, glstate->vao->vertexattrib[0].buffer, glstate->vao->vertexattrib[0].real_buffer, glstate->vao->vertexattrib[1].pointer, glstate->vao->vertexattrib[1].real_pointer, glstate->vao->vertexattrib[1].buffer, glstate->vao->vertexattrib[1].real_buffer, glstate->vao->vertexattrib[2].pointer, glstate->vao->vertexattrib[2].real_pointer, glstate->vao->vertexattrib[2].buffer, glstate->vao->vertexattrib[2].real_buffer, GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 0), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 1), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 2), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 3), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 0), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 1), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 2), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 3));
++    static unsigned gua_scene_vertex_dump;
++    if (getenv("GUA_VERTEX_TRACE") && gua_scene_vertex_dump == 0 && glstate->glsl && glstate->glsl->program == 18 && mode == GL_TRIANGLES && count >= 6 && glstate->vao->vertexattrib[ATT_VERTEX].enabled && glstate->vao->vertexattrib[2].enabled && glstate->vao->vertexattrib[ATT_VERTEX].buffer == 0 && glstate->vao->vertexattrib[2].buffer == 0 && glstate->vao->vertexattrib[ATT_VERTEX].pointer && glstate->vao->vertexattrib[2].pointer && (uintptr_t)glstate->vao->vertexattrib[ATT_VERTEX].pointer > 0x10000 && (uintptr_t)glstate->vao->vertexattrib[2].pointer > 0x10000) {
++        const vertexattrib_t *vp = &glstate->vao->vertexattrib[ATT_VERTEX];
++        const vertexattrib_t *cp = &glstate->vao->vertexattrib[2];
++        unsigned n = count < 6 ? count : 6;
++        float xmin = 1e30f, ymin = 1e30f, xmax = -1e30f, ymax = -1e30f;
++        fprintf(stderr, "GUA-VERTEX-TRACE program=18 count=%d index_type=%s vp=%p cp=%p stride=%d/%d len=%u\\n", count, sindices ? "ushort" : "uint", vp->pointer, cp->pointer, vp->stride, cp->stride, len);
++        for (unsigned j=0; j<n; ++j) {
++            unsigned idx = sindices ? sindices[j] : (iindices ? iindices[j] : j);
++            if (idx >= len) { fprintf(stderr, "GUA-VERTEX-SKIP idx=%u out_of_range len=%u\\n", idx, len); continue; }
++            const unsigned char *pp = (const unsigned char*)vp->pointer + (size_t)idx * (vp->stride ? vp->stride : vp->size * sizeof(float));
++            const unsigned char *cc = (const unsigned char*)cp->pointer + (size_t)idx * (cp->stride ? cp->stride : 4);
++            const float *pf = (const float*)pp;
++            const unsigned char *cb = cc;
++            if (pf[0] < xmin) xmin=pf[0]; if (pf[0] > xmax) xmax=pf[0];
++            if (pf[1] < ymin) ymin=pf[1]; if (pf[1] > ymax) ymax=pf[1];
++            fprintf(stderr, "GUA-VERTEX idx=%u pos=(%.9g,%.9g,%.9g,%.9g) color=(%u,%u,%u,%u)\\n", idx, pf[0], pf[1], pf[2], pf[3], cb[0], cb[1], cb[2], cb[3]);
++        }
++        fprintf(stderr, "GUA-DRAW-COVERAGE program=18 ndc_bbox=(%.9g,%.9g)-(%.9g,%.9g)\\n", xmin, ymin, xmax, ymax);
++        gua_scene_vertex_dump = 1;
++    } else if (getenv("GUA_VERTEX_TRACE") && gua_scene_vertex_dump == 0 && glstate->glsl && glstate->glsl->program == 18) {
++        fprintf(stderr, "GUA-VERTEX-SKIP program=18 unsafe_or_nonclient_arrays\\n");
++        gua_scene_vertex_dump = 1;
++    }
+     if (glstate->raster.bm_drawing)
+         bitmap_flush();
+     DBG(printf("glDrawElementsCommon(%s, %d, %d, %d, %p, %p, %d)\n", PrintEnum(mode), first, count, len, sindices, iindices, instancecount);)
+@@ -428,6 +463,7 @@ if(count>500000) return;
+                 gles_glDrawArrays(mode, first, count);
+             else
+                 gles_glDrawElements(mode, count, (sindices)?GL_UNSIGNED_SHORT:GL_UNSIGNED_INT, (sindices?((void*)sindices):((void*)iindices)));
++                gua_pixel_trace("PIXEL_AFTER_DRAW");
+         } else {
+             if(!iindices && !sindices)
+                 fpe_glDrawArraysInstanced(mode, first, count,instancecount);
+@@ -455,7 +491,8 @@ if(count>500000) return;
+ #define MAX_BATCH  globals4es.maxbatch
+ 
+ void APIENTRY_GL4ES gl4es_glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
+-    DBG(printf("glDrawRangeElements(%s, %i, %i, %i, %s, @%p), inlist=%i, pending=%d\n", PrintEnum(mode), start, end, count, PrintEnum(type), indices, (glstate->list.active)?1:0, glstate->list.pending);)
++    GUA_DRAW_TRACE("RANGE mode=0x%x start=%u end=%u count=%d type=0x%x logical_fbo=%u", mode, start, end, count, type, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
++    DBG(printf("glDrawRangeElements(%s, %i, %i, %i, %s, @%p), inlist=%i, pending=%d\\n", PrintEnum(mode), start, end, count, PrintEnum(type), indices, (glstate->list.active)?1:0, glstate->list.pending);)
+     count = adjust_vertices(mode, count);
+     
+     if (count<0) {
+@@ -559,7 +596,8 @@ AliasExport(void,glDrawRangeElements,EXT,(GLenum mode,GLuint start,GLuint end,GL
+ 
+ 
+ void APIENTRY_GL4ES gl4es_glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices) {
+-    DBG(printf("glDrawElements(%s, %d, %s, %p), vtx=%p map=%p, pending=%d\n", PrintEnum(mode), count, PrintEnum(type), indices, (glstate->vao->vertex)?glstate->vao->vertex->data:NULL, (glstate->vao->elements)?glstate->vao->elements->data:NULL, glstate->list.pending);)
++    GUA_DRAW_TRACE("ELEMENTS mode=0x%x count=%d type=0x%x logical_fbo=%u", mode, count, type, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
++    DBG(printf("glDrawElements(%s, %d, %s, %p), vtx=%p map=%p, pending=%d\\n", PrintEnum(mode), count, PrintEnum(type), indices, (glstate->vao->vertex)?glstate->vao->vertex->data:NULL, (glstate->vao->elements)?glstate->vao->elements->data:NULL, glstate->list.pending);)
+     // TODO: split for count > 65535?
+     // special check for QUADS and TRIANGLES that need multiple of 4 or 3 vertex...
+     count = adjust_vertices(mode, count);
+diff --git a/src/gl/program.c b/src/gl/program.c
+index 2eaeb02..a932088 100644
+--- a/src/gl/program.c
++++ b/src/gl/program.c
+@@ -10,6 +10,13 @@
+ #include "loader.h"
+ #include "shaderconv.h"
+ #include "fpe_shader.h"
++#include <stdio.h>
++
++static unsigned gua_program_trace_events;
++#define GUA_PROGRAM_TRACE(fmt, ...) do { \
++    if (gua_program_trace_events < 256) \
++        fprintf(stderr, "GUA-PROGRAM n=%u " fmt "\n", ++gua_program_trace_events, ##__VA_ARGS__); \
++} while (0)
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -43,6 +50,7 @@ void APIENTRY_GL4ES gl4es_glAttachShader(GLuint program, GLuint shader) {
+         glprogram->last_vert = glshader;
+     else if(glshader->type==GL_FRAGMENT_SHADER && !glprogram->last_frag)
+         glprogram->last_frag = glshader;
++    fprintf(stderr, "GUA-ATTACH program=%u shader=%u type=0x%x attach_size=%d last_vert=%u last_frag=%u\\n", glprogram->id, glshader->id, glshader->type, glprogram->attach_size, glprogram->last_vert ? glprogram->last_vert->id : 0, glprogram->last_frag ? glprogram->last_frag->id : 0);
+     // send to hadware
+     LOAD_GLES2(glAttachShader);
+     if(gles_glAttachShader) {
+@@ -91,6 +99,7 @@ GLuint APIENTRY_GL4ES gl4es_glCreateProgram(void) {
+     DBG(printf("glCreateProgram()\n");)
+     FLUSH_BEGINEND;
+     static GLuint lastprogram = 0;
++    static unsigned gua_program_generation = 0;
+     GLuint program;
+     // create the program
+     LOAD_GLES2(glCreateProgram);
+@@ -126,7 +135,9 @@ GLuint APIENTRY_GL4ES gl4es_glCreateProgram(void) {
+         memset(glprogram, 0, sizeof(program_t));
+     }
+     glprogram->id = program;
+-    // initialize attribloc hashmap
++    glprogram->gua_generation = ++gua_program_generation;
++    if (getenv("GUA_PROGRAM_GENERATION_TRACE"))
++        fprintf(stderr, "GUA-P-CREATE guest=%u native=%u gen=%u ptr=%p\\n", program, glprogram->id, glprogram->gua_generation, (void*)glprogram);
+     khash_t(attribloclist) *attribloc = glprogram->attribloc = kh_init(attribloclist);
+     // initialize uniform hashmap
+     khash_t(uniformlist) *uniform = glprogram->uniform = kh_init(uniformlist);
+@@ -806,6 +817,7 @@ void APIENTRY_GL4ES gl4es_glLinkProgram(GLuint program) {
+         noerrorShim();
+     }
+     glprogram->linked = 1;
++    GUA_PROGRAM_TRACE("LINK guest=%u native=%u gen=%u linked=%d", program, glprogram->id, glprogram->gua_generation, glprogram->linked);
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glUseProgram(GLuint program) {
+@@ -822,6 +834,7 @@ void APIENTRY_GL4ES gl4es_glUseProgram(GLuint program) {
+ 
+     glstate->glsl->program=glprogram->id;
+     glstate->glsl->glprogram=glprogram;
++    GUA_PROGRAM_TRACE("USE guest=%u native=%u gen=%u linked=%d", program, glprogram->id, glprogram->gua_generation, glprogram->linked);
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glValidateProgram(GLuint program) {
+diff --git a/src/gl/program.h b/src/gl/program.h
+index a788da4..05d279f 100644
+--- a/src/gl/program.h
++++ b/src/gl/program.h
+@@ -206,6 +206,7 @@ typedef struct {
+ 
+ typedef struct {
+     GLuint          id;     // internal id of the shader
++    unsigned        gua_generation; // diagnostic instance generation
+     int             linked;
+     int             validated;
+     GLenum          valid_result;
+diff --git a/src/gl/uniform.c b/src/gl/uniform.c
+index 98b5614..fb58b86 100644
+--- a/src/gl/uniform.c
++++ b/src/gl/uniform.c
+@@ -5,6 +5,7 @@
+ #include "glstate.h"
+ #include "loader.h"
+ #include "matvec.h"
++#include <stdio.h>
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -180,6 +181,7 @@ void GoUniformfv(program_t *glprogram, GLint location, int size, int count, cons
+         return;
+     }
+     m = kh_value(glprogram->uniform, k);
++    if ((glprogram->id == 21 || glprogram->id == 86 || glprogram->id == 2 || glprogram->id == 22 || glprogram->id == 18) && m) fprintf(stderr, "GUA-UNIFORM-F program=%u loc=%d name=%s type=0x%x size=%d count=%d v0=%.6g v1=%.6g v2=%.6g v3=%.6g\n", glprogram->id, location, m->name ? m->name : "?", m->type, size, count, value[0], (size > 1 ? value[1] : 0), (size > 2 ? value[2] : 0), (size > 3 ? value[3] : 0));
+     if(size != n_uniform(m->type) || !is_uniform_float(m->type) || count>m->size) {
+         errorShim(GL_INVALID_OPERATION);
+         return;
+@@ -227,6 +229,7 @@ void GoUniformiv(program_t *glprogram, GLint location, int size, int count, cons
+         return;
+     }
+     m = kh_value(glprogram->uniform, k);
++    if ((glprogram->id == 21 || glprogram->id == 86 || glprogram->id == 2 || glprogram->id == 22 || glprogram->id == 18) && m) fprintf(stderr, "GUA-UNIFORM-I program=%u loc=%d name=%s type=0x%x size=%d count=%d v0=%d v1=%d v2=%d v3=%d\n", glprogram->id, location, m->name ? m->name : "?", m->type, size, count, value[0], (size > 1 ? value[1] : 0), (size > 2 ? value[2] : 0), (size > 3 ? value[3] : 0));
+     if(size != n_uniform(m->type) || !is_uniform_int(m->type)  || count>m->size) {
+         errorShim(GL_INVALID_OPERATION);
+         return;
+@@ -692,7 +695,11 @@ void GoUniformMatrix4fv(program_t *glprogram, GLint location, GLsizei count, GLb
+     memcpy((char*)glprogram->cache.cache + m->cache_offs, v, rsize);
+     LOAD_GLES2(glUniformMatrix4fv);
+     if (gles_glUniformMatrix4fv) {
++        if (getenv("GUA_UNIFORM_ORIGIN_TRACE") && glprogram->id == 22)
++            fprintf(stderr, "GUA-NATIVE-UNIFORM-CANDIDATE api=glUniformMatrix4fv program_guest=%u program_native=%u guest_loc=%d native_loc=%d count=%d transpose=%d m0=%g m1=%g m2=%g m3=%g\\n", glprogram->id, glprogram->id, location, m->id, count, transpose, v[0], v[1], v[2], v[3]);
+         gles_glUniformMatrix4fv(m->id, count, GL_FALSE, v);
++        if (getenv("GUA_UNIFORM_ORIGIN_TRACE") && glprogram->id == 22)
++            fprintf(stderr, "GUA-NATIVE-UNIFORM-RETURN api=glUniformMatrix4fv program_guest=%u native_loc=%d\\n", glprogram->id, m->id);
+         errorGL();
+     } else {
+         //printf("No GLES2 function\n");
