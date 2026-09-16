@@ -1,0 +1,84 @@
+Guacamelee Box32 direct — native FBO binding attribution
+Date: 2026-09-17
+
+Native draw binding trace
+-------------------------
+A diagnostic-only native `glGetIntegerv(GL_FRAMEBUFFER_BINDING)` was added at the
+entry of selected program18/program22/program86 draw calls. It does not change
+framebuffer state.
+
+At representative scene draws:
+
+  program=18 logical_current=0 logical_draw=0 logical_read=1 native_binding=0
+  program=22 logical_current=0 logical_draw=0 logical_read=1 native_binding=0
+  program=86 logical_current=0 logical_draw=0 logical_read=1 native_binding=0
+
+The trace also reports `mainfbo_fbo=0` in the pipeline events. Therefore logical
+FBO0 correctly maps to native default framebuffer 0 in this runtime. There is no
+observed native FBO1 draw binding around the program18/program22/program86 scene
+draws.
+
+Resolve sequence
+----------------
+The presentation/resolve path later changes logical state to:
+
+  current=2, draw=2, read=1, native=2
+  temporary ReadDraw_Push(GL_READ_FRAMEBUFFER) -> native=1
+  FBO1/native1 source sample -> rgba=0,0,0,255
+  restore -> native=2
+  BLIT read=1 draw=2
+  FBO2 texture2 destination sample -> rgba=0,0,0,255
+
+This confirms a real state split:
+
+  scene draw target: native default FBO0
+  resolve read target: native FBO1
+
+However, this is not by itself proof of a bug. FBO1 may be a game/internal
+read target, or the application may intentionally draw to the default surface.
+No hardcoded redirection or global FBO remapping was applied.
+
+Observed draw distribution
+--------------------------
+
+  logical/native FBO0: 60 selected draws, native binding 0
+  logical FBO1:        0 selected draws
+  logical FBO2:        0 selected draws
+  logical/native FBO3: 12 selected draws, native binding 3
+
+Relevant draw programs on FBO0 were 18, 22, 86 and 2. Program21 draws to FBO3.
+
+Safety
+------
+- build succeeded
+- native binding query is read-only
+- no state mutation in the normal path
+- no SIGSEGV in the device run
+- latest diagnostic runtime restored afterward
+- production launcher/game binary/ARMHF bridge untouched
+
+Raw evidence
+------------
+  /mnt/external/Hermes/guac-fbtrace-runtime.log
+  size=413175 bytes
+  SHA-256=61cdd0a0b6279784493d0fb483ae8fb5cecb9e7eeff86748d05e7162d00df0d6
+
+Previous exact FBO1 source readback:
+
+  /mnt/external/Hermes/guac-readsrc-runtime.log
+  SHA-256=8f67a2587aa8adffba29bbccfe5083c2700d592be21565acb41d47213859aa7a
+
+Conclusion
+----------
+
+  NATIVE_FBO_SCENE_TARGET=DEFAULT_FBO0
+  NATIVE_FBO_RESOLVE_READ=FBO1
+  FBO1_SOURCE_PIXEL_BEFORE_BLIT=BLACK
+  FBO2_DEST_PIXEL_AFTER_BLIT=BLACK
+  FBO1_SCENE_WRITER=NOT_OBSERVED
+  FBO_REMAP_FIX=NOT_JUSTIFIED
+
+The next plan should determine whether the expected producer is an application
+native path outside `glDrawElementsCommon`, a missing gl4es main-FBO setup, or an
+intentional default-FBO rendering path whose presentation should not use FBO1.
+Only after that classification should one narrow fix be attempted.

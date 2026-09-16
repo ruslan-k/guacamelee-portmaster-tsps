@@ -1,5 +1,5 @@
 diff --git a/src/gl/drawing.c b/src/gl/drawing.c
-index 498ecc5..d111632 100644
+index 498ecc5..dbf5e0b 100644
 --- a/src/gl/drawing.c
 +++ b/src/gl/drawing.c
 @@ -9,6 +9,16 @@
@@ -19,10 +19,16 @@ index 498ecc5..d111632 100644
  
  //#define DEBUG
  #ifdef DEBUG
-@@ -285,6 +295,31 @@ GLuint len_indices(const GLushort *sindices, const GLuint *iindices, GLsizei cou
+@@ -285,6 +295,37 @@ GLuint len_indices(const GLushort *sindices, const GLuint *iindices, GLsizei cou
  }
  
  static void glDrawElementsCommon(GLenum mode, GLint first, GLsizei count, GLuint len, const GLushort *sindices, const GLuint *iindices, int instancecount) {
++    if (getenv("GUA_NATIVE_FBO_TRACE") && glstate && glstate->glsl && (glstate->glsl->program == 18 || glstate->glsl->program == 22 || glstate->glsl->program == 86)) {
++        GLint gua_native_fbo = -1;
++        LOAD_GLES2(glGetIntegerv);
++        if (gles_glGetIntegerv) gles_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &gua_native_fbo);
++        fprintf(stderr, "GUA-NATIVE-FBO-DRAW program=%u logical_current=%u logical_draw=%u logical_read=%u native_binding=%d\\n", glstate->glsl->program, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, glstate->fbo.fbo_draw ? glstate->fbo.fbo_draw->id : 0, glstate->fbo.fbo_read ? glstate->fbo.fbo_read->id : 0, gua_native_fbo);
++    }
 +    GUA_DRAW_TRACE("COMMON mode=0x%x first=%d count=%d len=%u instances=%d logical_fbo=%u program=%u attrib0=%d/%d/%d/%d attrib1=%d/%d/%d/%d attrib2=%d/%d/%d/%d attrib3=%d/%d/%d/%d p0=%p rp0=%p b0=%p rb0=%u p1=%p rp1=%p b1=%p rb1=%u p2=%p rp2=%p b2=%p rb2=%u v0=%.6g,%.6g,%.6g,%.6g c0=%u,%u,%u,%u", mode, first, count, len, instancecount, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, glstate->glsl ? glstate->glsl->program : 0, glstate->vao->vertexattrib[0].enabled, glstate->vao->vertexattrib[0].size, glstate->vao->vertexattrib[0].type, glstate->vao->vertexattrib[0].stride, glstate->vao->vertexattrib[1].enabled, glstate->vao->vertexattrib[1].size, glstate->vao->vertexattrib[1].type, glstate->vao->vertexattrib[1].stride, glstate->vao->vertexattrib[2].enabled, glstate->vao->vertexattrib[2].size, glstate->vao->vertexattrib[2].type, glstate->vao->vertexattrib[2].stride, glstate->vao->vertexattrib[3].enabled, glstate->vao->vertexattrib[3].size, glstate->vao->vertexattrib[3].type, glstate->vao->vertexattrib[3].stride, glstate->vao->vertexattrib[0].pointer, glstate->vao->vertexattrib[0].real_pointer, glstate->vao->vertexattrib[0].buffer, glstate->vao->vertexattrib[0].real_buffer, glstate->vao->vertexattrib[1].pointer, glstate->vao->vertexattrib[1].real_pointer, glstate->vao->vertexattrib[1].buffer, glstate->vao->vertexattrib[1].real_buffer, glstate->vao->vertexattrib[2].pointer, glstate->vao->vertexattrib[2].real_pointer, glstate->vao->vertexattrib[2].buffer, glstate->vao->vertexattrib[2].real_buffer, GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 0), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 1), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 2), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 3), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 0), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 1), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 2), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 3));
 +    static unsigned gua_scene_vertex_dump;
 +    if (getenv("GUA_VERTEX_TRACE") && gua_scene_vertex_dump == 0 && glstate->glsl && glstate->glsl->program == 18 && mode == GL_TRIANGLES && count >= 6 && glstate->vao->vertexattrib[ATT_VERTEX].enabled && glstate->vao->vertexattrib[2].enabled && glstate->vao->vertexattrib[ATT_VERTEX].buffer == 0 && glstate->vao->vertexattrib[2].buffer == 0 && glstate->vao->vertexattrib[ATT_VERTEX].pointer && glstate->vao->vertexattrib[2].pointer && (uintptr_t)glstate->vao->vertexattrib[ATT_VERTEX].pointer > 0x10000 && (uintptr_t)glstate->vao->vertexattrib[2].pointer > 0x10000) {
@@ -51,7 +57,7 @@ index 498ecc5..d111632 100644
      if (glstate->raster.bm_drawing)
          bitmap_flush();
      DBG(printf("glDrawElementsCommon(%s, %d, %d, %d, %p, %p, %d)\n", PrintEnum(mode), first, count, len, sindices, iindices, instancecount);)
-@@ -424,10 +459,19 @@ if(count>500000) return;
+@@ -424,10 +465,19 @@ if(count>500000) return;
  
          // POLYGON mode as LINE is "intercepted" and drawn using list
          if(instancecount==1 || hardext.esversion==1) {
@@ -71,7 +77,7 @@ index 498ecc5..d111632 100644
          } else {
              if(!iindices && !sindices)
                  fpe_glDrawArraysInstanced(mode, first, count,instancecount);
-@@ -455,7 +499,8 @@ if(count>500000) return;
+@@ -455,7 +505,8 @@ if(count>500000) return;
  #define MAX_BATCH  globals4es.maxbatch
  
  void APIENTRY_GL4ES gl4es_glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
@@ -81,7 +87,7 @@ index 498ecc5..d111632 100644
      count = adjust_vertices(mode, count);
      
      if (count<0) {
-@@ -559,7 +604,8 @@ AliasExport(void,glDrawRangeElements,EXT,(GLenum mode,GLuint start,GLuint end,GL
+@@ -559,7 +610,8 @@ AliasExport(void,glDrawRangeElements,EXT,(GLenum mode,GLuint start,GLuint end,GL
  
  
  void APIENTRY_GL4ES gl4es_glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices) {
