@@ -417,6 +417,41 @@ index a917658..8a0427a 100644
  
  void APIENTRY_GL4ES gl4es_glDrawBuffers(GLsizei n, const GLenum *bufs);
  void APIENTRY_GL4ES gl4es_glNamedFramebufferDrawBuffers(GLuint framebuffer, GLsizei n, const GLenum *bufs);
+diff --git a/src/gl/shader.c b/src/gl/shader.c
+index 0bde8f1..34e3b18 100644
+--- a/src/gl/shader.c
++++ b/src/gl/shader.c
+@@ -7,6 +7,13 @@
+ #include "glstate.h"
+ #include "loader.h"
+ #include "shaderconv.h"
++#include <stdio.h>
++
++static unsigned gua_shader_trace_events;
++#define GUA_SHADER_TRACE(fmt, ...) do { \
++    if (gua_shader_trace_events < 256) \
++        fprintf(stderr, "GUA-SHADER n=%u " fmt "\n", ++gua_shader_trace_events, ##__VA_ARGS__); \
++} while (0)
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -131,6 +138,7 @@ void APIENTRY_GL4ES gl4es_glCompileShader(GLuint shader) {
+             LOAD_GLES2(glGetShaderInfoLog);
+             GLint status = 0;
+             gles_glGetShaderiv(glshader->id, GL_COMPILE_STATUS, &status);
++            GUA_SHADER_TRACE("COMPILE guest=%u native=%u type=0x%x status=%d", shader, glshader->id, glshader->type, status);
+             if(status!=GL_TRUE) {
+                 printf("LIBGL: Error while compiling shader %d. Original source is:\n%s\n=======\n", glshader->id, glshader->source);
+                 printf("ShaderConv Source is:\n%s\n=======\n", glshader->converted);
+@@ -169,6 +177,8 @@ void APIENTRY_GL4ES gl4es_glShaderSource(GLuint shader, GLsizei count, const GLc
+         for (int i=0; i<count; i++)
+             strcat(glshader->source, string[i]);
+     }
++    if (shader == 19 || shader == 20)
++        fprintf(stderr, "GUA-SHADER-SOURCE shader=%u len=%d src=%.*s\\n", shader, l, l > 600 ? 600 : l, glshader->source);
+     LOAD_GLES2(glShaderSource);
+     if (gles_glShaderSource) {
+         // adapt shader if needed (i.e. not an es2 context and shader is not #version 100)
 diff --git a/src/gl/texture.c b/src/gl/texture.c
 index c0d479a..b08f8e5 100644
 --- a/src/gl/texture.c
@@ -447,17 +482,33 @@ index c0d479a..b08f8e5 100644
      if(data==NULL && (internalformat == GL_RGB16F || internalformat == GL_RGBA16F))
      internal2format_type(internalformat, &format, &type);
 diff --git a/src/gl/uniform.c b/src/gl/uniform.c
-index 98b5614..043af1e 100644
+index 98b5614..9a3fe35 100644
 --- a/src/gl/uniform.c
 +++ b/src/gl/uniform.c
-@@ -295,6 +295,7 @@ void APIENTRY_GL4ES gl4es_glUniform1i(GLint location, GLint v0) {
-     DBG(printf("glUniform1i(%d, %d)\n", location, v0);)
-     PUSH_IF_COMPILING(glUniform1i);
-     GLuint program = glstate->glsl->program;
-+    if (program == 21) fprintf(stderr, "GUA-UNIFORM1I program=%u location=%d value=%d\\n", program, location, v0);
-     CHECK_PROGRAM(void, program);
-     APPLY_PROGRAM(program, glprogram);
-     GoUniformiv(glprogram, location, 1, 1, &v0);
+@@ -5,6 +5,7 @@
+ #include "glstate.h"
+ #include "loader.h"
+ #include "matvec.h"
++#include <stdio.h>
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -180,6 +181,7 @@ void GoUniformfv(program_t *glprogram, GLint location, int size, int count, cons
+         return;
+     }
+     m = kh_value(glprogram->uniform, k);
++    if (glprogram->id == 21 && m) fprintf(stderr, "GUA-UNIFORM-F program=%u loc=%d name=%s type=0x%x size=%d count=%d v0=%.6g v1=%.6g v2=%.6g v3=%.6g\n", glprogram->id, location, m->name ? m->name : "?", m->type, size, count, value[0], (size > 1 ? value[1] : 0), (size > 2 ? value[2] : 0), (size > 3 ? value[3] : 0));
+     if(size != n_uniform(m->type) || !is_uniform_float(m->type) || count>m->size) {
+         errorShim(GL_INVALID_OPERATION);
+         return;
+@@ -227,6 +229,7 @@ void GoUniformiv(program_t *glprogram, GLint location, int size, int count, cons
+         return;
+     }
+     m = kh_value(glprogram->uniform, k);
++    if (glprogram->id == 21 && m) fprintf(stderr, "GUA-UNIFORM-I program=%u loc=%d name=%s type=0x%x size=%d count=%d v0=%d v1=%d v2=%d v3=%d\n", glprogram->id, location, m->name ? m->name : "?", m->type, size, count, value[0], (size > 1 ? value[1] : 0), (size > 2 ? value[2] : 0), (size > 3 ? value[3] : 0));
+     if(size != n_uniform(m->type) || !is_uniform_int(m->type)  || count>m->size) {
+         errorShim(GL_INVALID_OPERATION);
+         return;
 diff --git a/src/gl/wrap/gles.c b/src/gl/wrap/gles.c
 index c647cee..d073a72 100644
 --- a/src/gl/wrap/gles.c
