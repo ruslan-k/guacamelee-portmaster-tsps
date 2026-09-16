@@ -4,6 +4,41 @@ Status: NOT RUN — build blocked before producing a binary.
 
 The source is `experiments/box32-direct/src/native_probe.c`. It was updated to query `eglGetCurrentDisplay`, `eglGetCurrentContext`, `eglGetCurrentSurface(EGL_DRAW/READ)` after SDL context creation.
 
-Attempted build environment: Ubuntu 20.04 container with `gcc-aarch64-linux-gnu`, SDL2/GLES/EGL headers and target TSPS libraries copied into a sysroot. The container stalled in `apt-get install` for 420 seconds; `/tmp/probe-build` remained empty. No PASS/FAIL is claimed for native KMSDRM visibility.
+Attempted build environment: an initial Ubuntu 20.04 container without the multiarch setup stalled in `apt-get install` for 420 seconds; `/tmp/probe-build` remained empty. This was superseded by the successful multiarch Dockerfile.64-derived build documented below.
 
 Required next run: build with a cached/pinned compatible toolchain, then execute on TSPS with only native SDL2/EGL/GLES, `SDL_VIDEODRIVER=KMSDRM`, and capture physical magenta while 120 swaps are active.
+
+## Executed result (2026-09-16)
+
+The probe was rebuilt in the multiarch Dockerfile.64-derived image and deployed temporarily to TSPS.
+
+Binary:
+
+```text
+ELF 64-bit LSB pie executable, ARM aarch64
+SHA-256: 1e885ac1141fbb3385f41946e454313c99e9869f180cd28c088aeb66a0952d75
+```
+
+Runtime output:
+
+```text
+SDL_Init rc=0 driver=KMSDRM
+CurrentDisplayMode 1280x720@60
+CreateWindow 1280x720
+CreateContext non-null
+window=1280x720 drawable=1280x720
+EGL display/context/draw/read all non-null
+EGL error=0x3000 vendor=ARM version=1.4 Valhall-r32p0
+GL vendor=ARM renderer=Mali-G57
+GL version=OpenGL ES 3.2 v1.r32p0
+swap=30, 60, 90, 120
+hold-after-120
+```
+
+The probe reported `drmModeMoveCursor() failed` after SDL calls, but continued through 120 swaps. A live `fbscreenshot` was uniformly black. A live `kmsgrab` reported:
+
+```text
+No active framebuffers found on planes
+```
+
+Classification: **Stage 1 FAIL**. Native SDL reports successful context/swap calls, but the device has no active KMS scanout plane and no visible magenta output. Per the prescribed stop condition, i386 Box32/gl4es probes and the NULL-display patch deployment were not run after this failure. The direct Box32 issue is not currently actionable until native SDL/KMSDRM scanout is repaired or its ownership/DRM page-flip behavior is explained.

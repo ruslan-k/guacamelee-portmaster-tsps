@@ -28,5 +28,6 @@ int main(void) {
     printf("NATIVE GL vendor=%s renderer=%s version=%s\n",
       (const char*)glGetString(GL_VENDOR),(const char*)glGetString(GL_RENDERER),(const char*)glGetString(GL_VERSION));
     for (int i=1;i<=120;i++) { glClearColor(1,0,1,1); glClear(GL_COLOR_BUFFER_BIT); SDL_GL_SwapWindow(w); if (!(i%30)) printf("NATIVE swap=%d err=%s\n",i,SDL_GetError()); SDL_Delay(16); }
+    printf("NATIVE hold-after-120\n"); fflush(stdout); SDL_Delay(5000);
     SDL_GL_DeleteContext(c); SDL_DestroyWindow(w); SDL_Quit(); return 0;
 }

@@ -2,9 +2,17 @@
 
 `src/box64-box32-null-display.patch` was created as a separate generic Box64 patch. It changes only `addDisplay(void *d)` to return NULL before any X11 loading or Display dereference. The patch passes reverse-apply validation against the locally modified pinned checkout.
 
-Status: NOT BUILT / NOT DEPLOYED / NOT VALIDATED.
+A fresh Box64 binary was successfully built through the Dockerfile.64-derived multiarch image (Ubuntu 20.04, arm64 repositories, glibc 2.31 toolchain, pinned CMake 3.22.6):
 
-The attempted Box64 rebuild with the patch stalled in an Ubuntu 20.04 container while installing the cross-toolchain. No new Box64 binary or SHA-256 exists, so no device deployment was performed. The existing direct package remains on the pre-fix diagnostic baseline and retains the tracing X11 stub; it was not treated as a post-fix result.
+```text
+ELF 64-bit LSB executable, ARM aarch64
+maximum GLIBC requirement: 2.29
+SHA-256: ac602ca9aac22aaad86951b6fb0a68a62f08b4ee9ffd7ff2823a946267fc2d00
+```
+
+Status: BUILT / NOT DEPLOYED / NOT VALIDATED.
+
+The earlier non-multiarch build attempt stalled, but the Dockerfile.64-derived rebuild above completed. Because Stage 1 native KMSDRM failed, the new Box64 binary was deliberately not deployed; it has no device validation yet. The existing direct package remains on the pre-fix diagnostic baseline and retains the tracing X11 stub.
 
 Required post-build acceptance:
 
