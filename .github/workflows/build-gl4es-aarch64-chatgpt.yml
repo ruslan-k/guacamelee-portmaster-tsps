@@ -1,0 +1,156 @@
+name: Build ARM64 gl4es for Box32 direct path
+
+on:
+  push:
+    branches:
+      - chatgpt-box64-box32-build
+    paths:
+      - .github/workflows/build-gl4es-aarch64-chatgpt.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:20.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      GL4ES_COMMIT: 81547d986798e876de8b434193920b606a72363f
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git build-essential cmake file binutils ca-certificates \
+            libegl1-mesa libgles2-mesa
+          cmake --version
+          gcc --version | head -1
+          ldd --version | head -1
+          uname -a
+
+      - name: Clone pinned gl4es source
+        run: |
+          git clone https://github.com/ptitSeb/gl4es.git gl4es-src
+          cd gl4es-src
+          git checkout "$GL4ES_COMMIT"
+          test "$(git rev-parse HEAD)" = "$GL4ES_COMMIT"
+
+      - name: Build AArch64 gl4es
+        run: |
+          cd gl4es-src
+          cmake -S . -B build \
+            -DNOX11=ON \
+            -DGBM=OFF \
+            -DDEFAULT_ES=2 \
+            -DUSE_CLOCK=ON \
+            -DGLX_STUBS=ON \
+            -DEGL_WRAPPER=ON \
+            -DSTATICLIB=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS='-O3 -pipe -march=armv8-a'
+          cmake --build build -j "$(nproc)"
+
+      - name: Verify ELF, ABI and exported API
+        run: |
+          set -eux
+          cd gl4es-src
+          test -f lib/libGL.so.1
+          test -f lib/libEGL.so.1
+          file lib/libGL.so.1 | tee /tmp/file-gl.txt
+          file lib/libEGL.so.1 | tee /tmp/file-egl.txt
+          readelf -h lib/libGL.so.1 | tee /tmp/readelf-h-gl.txt
+          readelf -d lib/libGL.so.1 | tee /tmp/readelf-d-gl.txt
+          readelf --version-info lib/libGL.so.1 | tee /tmp/readelf-v-gl.txt
+          nm -D --defined-only lib/libGL.so.1 | tee /tmp/nm-gl.txt
+          grep -Eq ' glGetString$' /tmp/nm-gl.txt
+          grep -Eq ' glShaderSource$' /tmp/nm-gl.txt
+          grep -Eq ' glDrawElements$' /tmp/nm-gl.txt
+          grep -Eq ' glXGetProcAddress(ARB)?$' /tmp/nm-gl.txt
+          ! grep -q 'Shared library: \[libX11' /tmp/readelf-d-gl.txt
+          max_glibc="$(grep -o 'GLIBC_[0-9.]*' /tmp/readelf-v-gl.txt | sort -Vu | tail -1 || true)"
+          echo "MAX_GLIBC=$max_glibc" | tee /tmp/glibc-max.txt
+
+      - name: Best-effort native loader smoke test
+        continue-on-error: true
+        run: |
+          set -eux
+          GLES="$(ldconfig -p | awk '/libGLESv2.so.2/{print $NF; exit}')"
+          EGL="$(ldconfig -p | awk '/libEGL.so.1/{print $NF; exit}')"
+          echo "GLES=$GLES EGL=$EGL" | tee /tmp/native-libs.txt
+          cat >/tmp/dlopen-gl4es.c <<'EOF'
+          #include <dlfcn.h>
+          #include <stdio.h>
+          int main(void) {
+              void *h = dlopen("./lib/libGL.so.1", RTLD_NOW | RTLD_GLOBAL);
+              if (!h) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 1; }
+              void *a = dlsym(h, "glGetString");
+              void *b = dlsym(h, "glXGetProcAddress");
+              printf("glGetString=%p glXGetProcAddress=%p\n", a, b);
+              return (!a || !b);
+          }
+          EOF
+          gcc -O2 /tmp/dlopen-gl4es.c -ldl -o /tmp/dlopen-gl4es
+          cd gl4es-src
+          LIBGL_ES=2 \
+          LIBGL_GL=21 \
+          LIBGL_NOTEST=1 \
+          LIBGL_GLES="$GLES" \
+          LIBGL_EGL="$EGL" \
+            /tmp/dlopen-gl4es 2>&1 | tee /tmp/dlopen-smoke.txt
+
+      - name: Package TSPS build
+        run: |
+          set -eux
+          mkdir -p out/gl4es-aarch64
+          cp -L gl4es-src/lib/libGL.so.1 out/gl4es-aarch64/libGL.so.1
+          cp -L gl4es-src/lib/libEGL.so.1 out/gl4es-aarch64/libEGL-gl4es.so.1
+          chmod 0755 out/gl4es-aarch64/libGL.so.1 out/gl4es-aarch64/libEGL-gl4es.so.1
+          strip --strip-unneeded out/gl4es-aarch64/libGL.so.1
+          strip --strip-unneeded out/gl4es-aarch64/libEGL-gl4es.so.1
+          ln -s libGL.so.1 out/gl4es-aarch64/libGL.so
+
+          cat > out/gl4es-aarch64/TSPS-ENV.sh <<'EOF'
+          # Source this only for the experimental Box32 direct-rendering path.
+          # GL4ES_DIR must point to this directory on the device.
+          : "${GL4ES_DIR:?set GL4ES_DIR to the gl4es-aarch64 directory}"
+          export BOX64_LIBGL="$GL4ES_DIR/libGL.so.1"
+          export LIBGL_GLES="/usr/trimui/lib/libGLESv2.so.2"
+          export LIBGL_EGL="/usr/trimui/lib/libEGL.so.1"
+          export LIBGL_ES=2
+          export LIBGL_GL=21
+          export LIBGL_NOTEST=1
+          export LIBGL_SHRINK=4
+          export LIBGL_FBOFORCETEX=1
+          EOF
+
+          cat > out/gl4es-aarch64/BUILD-INFO.txt <<EOF
+          Upstream: https://github.com/ptitSeb/gl4es
+          Commit: $GL4ES_COMMIT
+          Target: generic Linux AArch64
+          Build userspace: Ubuntu 20.04 / glibc 2.31
+          CMake: NOX11=ON GBM=OFF DEFAULT_ES=2 USE_CLOCK=ON GLX_STUBS=ON EGL_WRAPPER=ON STATICLIB=OFF Release
+          CPU flags: -O3 -pipe -march=armv8-a
+          Intended path: i386 Guacamelee -> Box64/Box32 -> wrapped libGL -> this AArch64 gl4es -> native TSPS EGL/GLES -> Mali
+          libEGL-gl4es.so.1 is included only as an optional diagnostic A/B. First test should use the system /usr/trimui/lib/libEGL.so.1.
+          EOF
+
+          file out/gl4es-aarch64/libGL.so.1 | tee out/gl4es-aarch64/FILE.txt
+          readelf -d out/gl4es-aarch64/libGL.so.1 > out/gl4es-aarch64/NEEDED.txt
+          readelf --version-info out/gl4es-aarch64/libGL.so.1 > out/gl4es-aarch64/VERSIONS.txt
+          cp /tmp/glibc-max.txt out/gl4es-aarch64/GLIBC-MAX.txt
+          cp /tmp/dlopen-smoke.txt out/gl4es-aarch64/DLOPEN-SMOKE.txt || true
+          cp /tmp/native-libs.txt out/gl4es-aarch64/BUILD-NATIVE-LIBS.txt || true
+          sha256sum out/gl4es-aarch64/libGL.so.1 out/gl4es-aarch64/libEGL-gl4es.so.1 | tee out/gl4es-aarch64/SHA256SUMS
+          tar -C out -czhf gl4es-aarch64-tsps.tar.gz gl4es-aarch64
+
+      - name: Upload gl4es artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gl4es-aarch64-tsps
+          path: |
+            out/gl4es-aarch64
+            gl4es-aarch64-tsps.tar.gz
+          if-no-files-found: error
+          retention-days: 7
