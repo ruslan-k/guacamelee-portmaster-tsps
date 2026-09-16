@@ -1,0 +1,46 @@
+# Final selected-path attachment-step trace
+
+Diagnostic library SHA-256:
+
+```text
+f59f38f23d062015ae7ea640e00b2645c75809d8bbc14c2a2755c2ee7bd11695
+```
+
+The trace added a bounded marker at every stage of the actual `framebuffers.c` texture attachment function:
+
+```text
+ENTRY
+AFTER_GET
+BEFORE_PUSH
+AFTER_PUSH
+BEFORE_SKIP
+AFTER_SET
+```
+
+Runtime produced only:
+
+```text
+GUA-ATTACH-STEP n=1 ENTRY fb=2 attachment=0x8ce0 tex=1 level=0
+GUA-ATTACH-STEP n=2 ENTRY fb=3 attachment=0x8ce0 tex=89 level=0
+GUA-ATTACH-STEP n=3 ENTRY fb=4 attachment=0x8ce0 tex=90 level=0
+GUA-ATTACH-STEP n=4 ENTRY fb=5 attachment=0x8ce0 tex=91 level=0
+```
+
+No `AFTER_GET`, `BEFORE_PUSH`, `BEFORE_SKIP`, `AFTER_SET`, or `TEX_ATTACH_POST` markers appeared. The process continued to real draws and swaps, so this is not a game crash. It proves that the selected entry boundary is reached but the expected post-entry source path is not executed in the runtime control flow; the next plan must identify the generated/aliased dispatch or non-local transfer before modifying FBO behavior.
+
+Raw log SHA-256:
+
+```text
+7ac79f24b9b7e7b9ec0ac0cc87f82aa079293b15b66c03e3b009c5c44142d8cb
+```
+
+Cleanup:
+
+```text
+exact game/Box64 processes: absent
+principal.sh: alive
+MainUI: alive
+production package/library: not replaced
+```
+
+No proposed compatibility A/B is promoted. The direct path remains diagnostic-only.
