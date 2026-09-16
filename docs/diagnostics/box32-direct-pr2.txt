@@ -1,0 +1,77 @@
+# Box32 direct diagnostic evidence
+
+Date: 2026-09-16
+PR: #2
+Device: TrimUI Smart Pro S / Longan
+Kernel: 5.15.147 #42 PREEMPT
+Userspace: aarch64, glibc 2.33, 1280x720 panel
+
+## Scope and safety
+
+The production `/mnt/SDCARD/Roms/PORTS/Guacamelee.sh` launcher and its ARMHF Box86/GLES bridge were not changed. The direct experiment used `/mnt/SDCARD/Roms/PORTS/Guacamelee-box32-direct.sh` and private files under `Data/ports/guacamelee/box32-direct/`. Paid game data was not committed. Stock Box64 was retained on-device as `box64-box32-aarch64-stock` with SHA-256 `5617a7aa1809761ccdbc2950c17ff293c2adf8871bd18362c5e188a3992d6cc2`.
+
+## PR recommendation results
+
+### Source/reproducibility
+
+Added:
+
+- `src/box64-box32-lowptr.patch` — actual applicable git patch for the Box64 GL/GLX string handlers;
+- `src/schedshim.c` — i386 `pthread_setschedprio` diagnostic shim;
+- `src/x11stub.c` — AArch64 minimal dlopen stub, not an X11 implementation;
+- `build-box64.sh` and `build-shims.sh`;
+- `src/native_probe.c` and `src/i386_probe.c` source for the independent probe stages.
+
+Box64 patched build was produced in Ubuntu 20.04/glibc 2.31 with:
+
+```text
+-DARM_DYNAREC=ON -DBOX32=ON -DBOX32_BINFMT=OFF
+-DCMAKE_BUILD_TYPE=Release -DSTATICBUILD=OFF
+```
+
+Patched compatible Box64 SHA-256:
+`6d60f6f4aa7975a4c9c514424987322f0ab06a6a88ab4d3af6f9d0af712cc77c`
+
+AArch64 gl4es came from `gl4es-aarch64-tsps.zip`, upstream commit `81547d986798e876de8b434193920b606a72363f`, with `NOX11=ON`, `GBM=OFF`, `DEFAULT_ES=2`, `GLX_STUBS=ON`, `EGL_WRAPPER=ON`.
+
+### Direct Guacamelee evidence
+
+The minimal direct path successfully reached:
+
+- Box32 recognition of the i386 ELF;
+- native wrapped SDL2;
+- native wrapped `BOX64_LIBGL` pointing to AArch64 gl4es;
+- emulated i386 FMOD libraries;
+- emulated i386 `libstdc++.so.6` and `libgcc_s.so.1`;
+- native EGL/GLES and `libmali.so.0.32.0` mappings;
+- `/dev/dri/card0`;
+- `misc.dat`, `levels.dat`, `resources.dat`;
+- `preinit.ini` and local-settings initialization.
+
+The original shared game binary was unpatched at offset `0x858da3` and contained `e8 08 b0 7a ff`. A private direct-only copy was created with exactly `90 90 90 90 90`; shared `gamedata/game-bin` was not modified.
+
+### Observed blockers and A/Bs
+
+1. Without the sched shim, Box32 stopped in `pthread_setschedprio()` on `__lll_lock_wait_private()`.
+2. With the shim, stock Box64 stopped on native `glGetString()` returning pointer `0x100005ad0` above the 32-bit guest range.
+3. Patched Box64 low-pointer wrappers passed `glGetString()` and proceeded through extensive `glXGetProcAddress` enumeration.
+4. The next run attempted `dlopen("libX11.so.6")`; TSPS has no desktop X11. The first patched run then hit Box64's `fclose(NULL)` missing-library error path.
+5. `LIBGL_FB=1` and `SDL_KMSDRM_REQUIRE_DRM_MASTER=0` were tested separately; both screenshots remained uniformly black. They are not accepted as fixes.
+6. `BOX64_RESERVE_HIGH=0`, `BOX64_MMAP32=1`, and `BOX32_PERSONA32BITS=1` did not prevent the native string pointer crossing 4 GiB.
+7. A run with the patched game and patched GL string wrapper reached a live two-thread state with `/dev/dri/card0`, but no `SDL_GL_CreateContext`/`SDL_GL_SwapWindow` breakpoint hit and `kmsgrab` reported no active framebuffer planes. A fresh `fbscreenshot` was uniform black.
+8. Before the minimal baseline, the GLX-stub Box64 run passed the low-pointer GL string boundary but ended with a missing-X11 probe and a `SIGSEGV` in Box64 `fclose`; the tracing-stub follow-up is documented below.
+
+### Latest minimal-baseline result
+
+8. The source-controlled minimal diagnostic launcher (no `LIBGL_FB`, no `LIBGL_SHRINK`, `BOX64_LOG=2`, `BOX64_DLSYM_ERROR=1`, `BOX64_WRAP_EGL=1`, shader-error logging) produced the following direct call trace: `SDL_Init -> SDL_GetNumVideoDisplays -> SDL_GetCurrentDisplayMode -> SDL_CreateWindow(1280,720) -> SDL_GL_CreateContext -> SDL_GL_SetSwapInterval -> glGetString -> extensive glXGetProcAddress`.
+9. The patched Box64 low-pointer wrapper returned guest-safe addresses for the GL strings; no high-pointer abort occurred in this run.
+10. The tracing X11 stub recorded no actual exported X11 calls. The next call was `glXGetCurrentDisplay`; Box64 attempted to map `libX11.so.6`, then the guest crashed at `glXGetCurrentDisplay` with `SIGSEGV` while dereferencing NULL. This proves the direct KMS/NOX11 path still leaks through a GLX current-display query; extending the X11 stub blindly is not accepted.
+11. The latest run ended with `exit_code=139`. No first draw or `SDL_GL_SwapWindow` was reached. The physical screenshot was captured while the process was alive and remained black.
+
+### Explicit acceptance status
+
+Not working yet. No claim is made for visible output, title scene, input, audio, or gameplay. The direct architecture is classified at the GLX current-display boundary. The next controlled step is an independent native SDL/KMS probe and an i386 Box32/gl4es probe; only after those pass should Guacamelee-specific GLX usage be changed.
+
+## Cleanup evidence
+
+After the last completed test, exact direct game/helper processes were terminated and `principal.sh`/MainUI were restored. No production bridge socket or presenter readiness marker was left behind. The direct package remains isolated for PR review and rollback.
