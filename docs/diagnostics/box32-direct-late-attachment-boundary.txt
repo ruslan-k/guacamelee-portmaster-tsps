@@ -1,0 +1,99 @@
+# Late attachment path boundary
+
+Date: 2026-09-16
+Device: TSPS / Longan
+
+## Diagnostic build
+
+Baseline gl4es was rebuilt with:
+
+- extended `gl4es_glCheckFramebufferStatus` snapshot;
+- FBO trace budget 4096;
+- observational `ATTACH_STATE` after `SetAttachment`;
+- observational `ATTACH_SKIP` at the early-return condition.
+
+Final library:
+
+```text
+AArch64 ELF
+SHA-256:
+3df008e6636ed8f644f0048b5e1610f6148883b1f01b0ee76f714d035dbb1431
+```
+
+## Runtime observation
+
+The selected game run emits:
+
+```text
+GUA-FBO ATTACH_TEX fbo=2 ... tex=1 level=0
+GUA-FBO CHECK ... native=2 current=2 ... color0=0/t0x0
+GUA-FBO ATTACH_TEX fbo=3 ... tex=89 level=0
+GUA-FBO CHECK ... native=3 current=3 ... color0=0/t0x0
+GUA-FBO ATTACH_TEX fbo=4 ... tex=90 level=0
+GUA-FBO CHECK ... native=4 current=4 ... color0=0/t0x0
+GUA-FBO ATTACH_TEX fbo=5 ... tex=91 level=0
+GUA-FBO CHECK ... native=5 current=5 ... color0=0/t0x0
+```
+
+The newly added markers never appeared:
+
+```text
+ATTACH_STATE: 0
+ATTACH_SKIP: 0
+TEX_ATTACH_POST: 0
+```
+
+This makes the earlier direct `framebuffers.c` post-query path unproven. The game-facing `ATTACH_TEX` marker and the status marker are in the same observable FBO family, but the source section after `SetAttachment` is not reached in this run. The next implementation step must instrument every return boundary and selected symbol/object identity before changing attachment behavior.
+
+## Early-return A/B
+
+As a separate diagnostic A/B, the early-return condition was disabled with `if (0 && ...)`, forcing the code section past that condition if reached. The A/B library SHA-256 was:
+
+```text
+da8f02d2114ceab5db3ed72f4c6f7b91e588409b13ce500a04cf55a13f2dd852
+```
+
+Runtime result:
+
+```text
+GUA-DRAW: 256
+GUA-SWAP: 376
+GL_INVALID_FRAMEBUFFER_OPERATION 0x506: 4773
+valid PNG: uniformly black
+```
+
+`ATTACH_STATE`, `ATTACH_SKIP`, and `TEX_ATTACH_POST` remained absent. Therefore disabling that condition did not produce a proven state change and is not a fix.
+
+Raw log SHA-256:
+
+```text
+f55d1e87fa5a3fbe0a4a4bf4d79f2b723e2138a1c5b9005aa76da43bd91a5709
+```
+
+PNG SHA-256:
+
+```text
+fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+## Classification
+
+```text
+asset archive lookup: PASS
+shader compile/link: PASS
+real draws: PASS
+real swaps: PASS
+native FBO A/B/C: PASS
+initial packed FBO: unsupported on baseline
+hardext.depthstencil=1: partial status improvement, no visual fix
+FBOFORCETEX=1: no visual fix
+late texture attachment post-state: NOT PROVEN
+late renderbuffer resolve state: NOT PROVEN
+visible synchronized menu: NOT PROVEN
+```
+
+Temporary diagnostic files were removed from TSPS after the run; no exact game/Box64 process remained. Production package/library was not replaced.
+
+## Next required diagnostic
+
+Instrument the selected symbol/object identity and every return boundary of the actual game-facing `glFramebufferTexture2D` implementation. The next trace must prove whether the call lands in `framebuffers.c`, a generated alias, or another translation unit before adding any attachment fix. Do not stack another FBO capability or presentation workaround.
