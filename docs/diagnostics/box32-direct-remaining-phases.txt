@@ -1,0 +1,135 @@
+# Remaining Box32 direct phases — swap proof and FBO A/B
+
+Date: 2026-09-16
+Device: TSPS / Longan
+
+## Exact swap wrapper
+
+Diagnostic Box64 wrapper patch changed only generated SDL2 entry `SDL_GL_SwapWindow` from `GO(..., vFp)` to custom `GOM(..., vFEp)` and forwarded exactly once to `my->SDL_GL_SwapWindow`.
+
+```text
+AArch64 ELF
+max GLIBC_2.29
+SHA-256:
+0e4ced3220ca847bc05fa77bcec771f9bb5abeba8c4735532513fabd2f7ba218
+```
+
+Real original-layout game run proved:
+
+```text
+GUA-SWAP: 340
+GUA-DRAW: 256 bounded events
+GUA-PROGRAM: 256 bounded events
+GUA-SHADER: 140 bounded events
+FMOD init succeeded with driver 1
+SIGSEGV: absent
+```
+
+This closes the previous `SDL_GL_SwapWindow NOT PROVEN` gate. The earlier AArch64 `LD_PRELOAD` zero result was only a native interposition limitation.
+
+## A/B: LIBGL_FBOFORCETEX=1
+
+Only `LIBGL_FBOFORCETEX` changed from baseline `0` to `1`.
+
+```text
+GUA-DRAW: 256
+GUA-SWAP: 338
+GL_INVALID_FRAMEBUFFER_OPERATION (0x506): 6892
+FBO 0x8cdd remained present
+```
+
+Two synchronized PNG captures were byte-identical and uniformly black:
+
+```text
+fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+Conclusion: not a fix; do not promote this option.
+
+## A/B: hardext.depthstencil=1
+
+Only the `GetHardwareExtensions(notest)` state was changed:
+
+```c
+hardext.depthstencil = 1;
+```
+
+Diagnostic gl4es:
+
+```text
+marker: GUA-HARDEXT notest=1 es=2 depthstencil=1
+SHA-256:
+2b0347728b1ef3828b0e4c731141bb7580afa5ccb041e5ce0da4399756ac31d0
+```
+
+Results:
+
+```text
+initial packed FBO: 0x8cdd -> 0x8cd5
+later title/resolve checks: GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT
+GUA-DRAW: 256
+GUA-SWAP: 110
+0x506 count: 334
+SIGSEGV: absent
+FMOD driver 1: initialized
+```
+
+PNG capture SHA-256:
+
+```text
+fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+Vision inspection: uniform black 1280x720, no menu. This is a partial status improvement, not a visual fix; it is not in the package.
+
+## Budget-expanded baseline trace
+
+The bounded FBO event budget was increased from 512 to 4096 only for diagnostics. Hardext was restored to baseline. This was used to determine whether a later `Renderbuffer resolve` failure was preceded by another gl4es attachment mutation.
+
+Library:
+
+```text
+AArch64 gl4es
+SHA-256:
+b1e86bee2d1cd637c020935b9fb764e169980fcc4ddee90c1a5c1aae58ab6cef
+```
+
+Raw log SHA-256:
+
+```text
+e233367343f2f06a8c908a1322c531a261b602704179bb00fd3ed798931b0674
+```
+
+Observed initial sequence:
+
+```text
+FBO1 color RB: native storage requested 0x8056, 1280x720
+FBO1 packed RB: requested 0x81a5, native 0x81a5, 1280x720
+same native RB 2 attached to DEPTH 0x8d00 and STENCIL 0x8d20
+FBO1 status: 0x8cdd
+FBO2 color texture: status 0x8cd7
+FBO3/4/5 color textures: status 0x8cd7
+```
+
+After those initial attachment calls, the trace shows repeated binds to default/native FBO 0 and no later `ATTACH_*` mutation before the title draw/swap loop. Therefore the late `GL_INVALID_FRAMEBUFFER_OPERATION` is not explained by a second visible gl4es attachment call in this trace. It remains necessary to correlate the game's `Renderbuffer resolve` check with the frontend/native binding and actual target program.
+
+## Current classification
+
+```text
+original asset layout/archive lookup: PASS
+native FBO A/B/C: PASS
+exact Box64 SDL swap boundary: PASS
+real draw: PASS
+shader compile/link: PASS
+LIBGL_FBOFORCETEX=1 visual fix: FAIL
+hardext.depthstencil=1 visual fix: FAIL (partial status improvement)
+late title/resolve FBO state: FAIL / missing attachment or frontend-state mismatch
+0x506 errors: reduced by hardext, not eliminated
+physical user report: blurred menu, then black
+synchronized PNG menu proof: NOT PRESENT
+input/audio/normal PortMaster lifecycle: NOT TESTED
+```
+
+No diagnostic library was promoted. Temporary TSPS artifacts were removed and no exact test game/Box64 process remained after cleanup.
+
+Next work should target the late `Renderbuffer resolve` check with a state-coherent frontend/native binding trace and program/texture provenance. Do not stack another capability flag, texture-forcing option, shader rewrite, or presenter workaround until that transition is directly identified.
