@@ -1,0 +1,80 @@
+Guacamelee Box32 direct — FBO0/FBO1 intent chronology
+Date: 2026-09-17
+
+Observed binding intent
+-----------------------
+Initial setup creates application-visible FBO1 and FBO2. FBO1 receives logical
+texture1 as color0 and FBO2 receives logical texture2 as color0. Both are
+complete in the diagnostic path.
+
+The first resolve sequence is:
+
+  bind GL_FRAMEBUFFER 1
+  bind GL_READ_FRAMEBUFFER 1
+  bind GL_DRAW_FRAMEBUFFER 2
+  native resolve read=1 draw=2
+  restore bind GL_FRAMEBUFFER 0
+
+At selected scene draws between resolves:
+
+  logical current=0
+  logical draw=0
+  logical read=1
+  native GL_FRAMEBUFFER_BINDING=0
+  mainfbo_fbo=0
+
+The pinned gl4es bind implementation deliberately keeps read/draw logical state
+separate and performs native read binding only inside ReadDraw_Push. The observed
+native values match that implementation; no generic bind translation defect is
+proven.
+
+FBO1 origin
+-----------
+FBO1 is created through the application-facing glGenFramebuffers path, not
+createMainFBO(). The internal `mainfbo_fbo` remains 0 in this runtime.
+
+  FBO1_ORIGIN=APPLICATION_GENFRAMEBUFFER
+  mainfbo_fbo=0
+
+FBO1/FBO2 source samples at the same resolve boundary:
+
+  native FBO0 pre-resolve = 0,0,0,0
+  native FBO1 pre-resolve = 0,0,0,255
+  FBO2 after BLIT         = 0,0,0,255
+
+The comparison is from the same diagnostic resolve boundary. Therefore the
+resolve-source substitution A/B was correctly skipped: FBO0 is also black at
+the exact boundary, so changing read source cannot prove the black-frame fix.
+
+Draw census in the bounded run
+-------------------------------
+
+  logical/native FBO0: 60 selected draw calls
+  logical FBO1:        0 selected draw calls
+  logical FBO2:        0 selected draw calls
+  logical/native FBO3: 12 selected draw calls
+
+Native selected draw records confirm program18/program22/program86 use FBO0/native0.
+No FBO1 writer was observed in the gl4es draw stream. This does not exclude a
+native operation outside glDrawElementsCommon, but no evidence currently proves
+one exists.
+
+Conclusion
+----------
+
+  FBO1 is application-created
+  FBO1 source is black before resolve
+  FBO0 is also black at the exact pre-resolve boundary
+  resolve-source A/B: SKIPPED BY STOP CONDITION
+  global FBO remap: NOT JUSTIFIED
+  next causal boundary: first non-black/black writer before pre-resolve
+
+Raw dual-sample log:
+  /mnt/external/Hermes/guac-intent-runtime.log
+  SHA-256=85f094519866f97463bc70cc916f3367111c268065e9252b66ca24050588d402
+
+Raw native FBO binding log:
+  /mnt/external/Hermes/guac-fbtrace-runtime.log
+  SHA-256=61cdd0a0b6279784493d0fb483ae8fb5cecb9e7eeff86748d05e7162d00df0d6
+
+No production runtime or game data was modified; latest diagnostic remains installed.

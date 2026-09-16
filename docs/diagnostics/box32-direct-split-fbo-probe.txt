@@ -1,0 +1,57 @@
+Guacamelee Box32 direct — synthetic split FBO probe
+Date: 2026-09-17
+
+Probe
+-----
+An i386 dynamic Box32 probe was built without linking SDL2/libGL at build time;
+SDL2 and libGL/gl4es are resolved through dlopen/dlsym at runtime, matching the
+Box32 closure.
+
+Source:
+  experiments/box32-direct/src/fbo_split_probe_dynamic.c
+
+Probe ELF SHA-256:
+  4276ece8d3bcfa92015a57a1e6ec65249721e6514d65abd72e51f87019eefe13
+
+Runtime flags:
+  LIBGL_NOTEST=1
+  LIBGL_ES=2
+  LIBGL_GL=21
+  SDL_VIDEODRIVER=KMSDRM
+  BOX64_LIBGL=<diagnostic libGL>
+  BOX64_PREFER_WRAPPED=1
+
+Results on TSPS
+---------------
+
+  BOX32_SPLIT_FBO_BLIT_CONTROL=PASS rgba=64,128,191,255
+  DEFAULT_FBO_VS_READ_FBO_CONTROL=PASS rgba=64,128,191,255
+  FBO_PROBE_GL_ERROR=0x0
+  process return code=0
+
+Test 1 clears FBO A to (64,128,191,255), blits READ=A to DRAW=B, and reads B.
+The expected non-black pixel is preserved.
+
+Test 2 clears default FBO0 to a different red color while leaving A unchanged,
+then blits READ=A to DRAW=B. B correctly remains the original A color. This
+proves the split READ/DRAW semantics and confirms that the read source selection
+is respected; the result is not a generic gl4es split-FBO failure.
+
+Rejected preliminary run
+------------------------
+A first attempt without LIBGL_NOTEST had maxcolorattach=0, produced 0x506 and
+failed the probe. It was configuration-mismatched and is not used as evidence.
+A second attempt with SDL_VIDEODRIVER=auto failed at SDL_Init because the direct
+probe had no initialized display path. It was also rejected. The KMSDRM run above
+is the valid result.
+
+Raw captured output:
+  /mnt/external/Hermes/fbo-split-probe-kms-notest-runtime.txt
+
+Conclusion
+----------
+
+  BOX32_SPLIT_FBO_BLIT_CONTROL=PASS
+  DEFAULT_FBO_VS_READ_FBO_CONTROL=PASS
+  generic split READ/DRAW emulation: EXONERATED
+  Guacamelee-specific FBO0/FBO1 intent/routing: remains the issue

@@ -1,0 +1,51 @@
+Guacamelee Box32 direct — corrected native error window
+Date: 2026-09-17
+
+The previous post-call-only attribution was corrected with a pre-clean native
+error window. The first matrix call was preceded by a pending native 0x502:
+
+  P22_MATRIX1_PRE_EXISTING_ERROR=0x502
+  P22_MATRIX1_PRE_CLEAN=1 after draining
+  P22_MATRIX1_POST_ERROR=0x0
+
+Therefore glUniformMatrix4fv is not the direct producer.
+
+A separate draw-error window checked native glGetError immediately after each
+selected program2/program22 draw. The first non-zero result is:
+
+  program=2
+  api=glDrawArrays
+  immediate native error=0x502
+
+All later program22 draw checkpoints in the same run returned 0x0. This moves the
+last-known direct producer to program2's native glDrawArrays path. No uniform
+fix was applied.
+
+Native state at program22 remains valid:
+
+  current program=22
+  cached location=1
+  queried location by name=1
+  matrix finite
+
+Raw corrected draw-error runtime:
+  /mnt/external/Hermes/guac-finalerr-runtime.log
+  size=654102 bytes
+  SHA-256=afc89021d5754b56d83bf3df6a3de92437bd564af62f75fce8c190a9a30d5d58
+
+Raw pre-clean window runtime:
+  /mnt/external/Hermes/guac-window-runtime.log
+  size=433842 bytes
+  SHA-256=be115d1adc5628220f771a8df087f035328c84789542a86d1dabac5d386959de
+
+Required classification:
+
+  NATIVE_502_PRE_CLEAN_MATRIX=0x502
+  NATIVE_502_DIRECT_PRODUCER=program2/glDrawArrays
+  P22_MATRIX_DIRECT_PRODUCER=NO
+  PROGRAM_SHADOW_DESYNC=DISPROVEN_AT_P22
+  CACHED_LOCATION_MISMATCH=DISPROVEN_AT_P22
+
+The immediate draw-error checks consume the native error and are diagnostic-only.
+The clean application-visible error remains documented separately. Latest
+ diagnostic runtime was left installed after testing.

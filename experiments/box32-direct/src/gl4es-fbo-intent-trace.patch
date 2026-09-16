@@ -1,0 +1,489 @@
+diff --git a/src/gl/drawing.c b/src/gl/drawing.c
+index 498ecc5..04e3127 100644
+--- a/src/gl/drawing.c
++++ b/src/gl/drawing.c
+@@ -9,6 +9,16 @@
+ #include "list.h"
+ #include "loader.h"
+ #include "render.h"
++#include "framebuffers.h"
++#include <stdio.h>
++
++static unsigned gua_draw_trace_events;
++#define GUA_SAFE_F(P, I) (((uintptr_t)(P) > 0x10000) ? ((const float*)(P))[I] : 0.0f)
++#define GUA_SAFE_C(P, I) (((uintptr_t)(P) > 0x10000) ? ((const unsigned char*)(P))[I] : 0)
++#define GUA_DRAW_TRACE(fmt, ...) do { \
++    if (gua_draw_trace_events < 256) \
++        fprintf(stderr, "GUA-DRAW n=%u " fmt "\n", ++gua_draw_trace_events, ##__VA_ARGS__); \
++} while (0)
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -285,6 +295,37 @@ GLuint len_indices(const GLushort *sindices, const GLuint *iindices, GLsizei cou
+ }
+ 
+ static void glDrawElementsCommon(GLenum mode, GLint first, GLsizei count, GLuint len, const GLushort *sindices, const GLuint *iindices, int instancecount) {
++    if (getenv("GUA_NATIVE_FBO_TRACE") && glstate && glstate->glsl && (glstate->glsl->program == 18 || glstate->glsl->program == 22 || glstate->glsl->program == 86)) {
++        GLint gua_native_fbo = -1;
++        LOAD_GLES2(glGetIntegerv);
++        if (gles_glGetIntegerv) gles_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &gua_native_fbo);
++        fprintf(stderr, "GUA-NATIVE-FBO-DRAW program=%u logical_current=%u logical_draw=%u logical_read=%u native_binding=%d\\n", glstate->glsl->program, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, glstate->fbo.fbo_draw ? glstate->fbo.fbo_draw->id : 0, glstate->fbo.fbo_read ? glstate->fbo.fbo_read->id : 0, gua_native_fbo);
++    }
++    GUA_DRAW_TRACE("COMMON mode=0x%x first=%d count=%d len=%u instances=%d logical_fbo=%u program=%u attrib0=%d/%d/%d/%d attrib1=%d/%d/%d/%d attrib2=%d/%d/%d/%d attrib3=%d/%d/%d/%d p0=%p rp0=%p b0=%p rb0=%u p1=%p rp1=%p b1=%p rb1=%u p2=%p rp2=%p b2=%p rb2=%u v0=%.6g,%.6g,%.6g,%.6g c0=%u,%u,%u,%u", mode, first, count, len, instancecount, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, glstate->glsl ? glstate->glsl->program : 0, glstate->vao->vertexattrib[0].enabled, glstate->vao->vertexattrib[0].size, glstate->vao->vertexattrib[0].type, glstate->vao->vertexattrib[0].stride, glstate->vao->vertexattrib[1].enabled, glstate->vao->vertexattrib[1].size, glstate->vao->vertexattrib[1].type, glstate->vao->vertexattrib[1].stride, glstate->vao->vertexattrib[2].enabled, glstate->vao->vertexattrib[2].size, glstate->vao->vertexattrib[2].type, glstate->vao->vertexattrib[2].stride, glstate->vao->vertexattrib[3].enabled, glstate->vao->vertexattrib[3].size, glstate->vao->vertexattrib[3].type, glstate->vao->vertexattrib[3].stride, glstate->vao->vertexattrib[0].pointer, glstate->vao->vertexattrib[0].real_pointer, glstate->vao->vertexattrib[0].buffer, glstate->vao->vertexattrib[0].real_buffer, glstate->vao->vertexattrib[1].pointer, glstate->vao->vertexattrib[1].real_pointer, glstate->vao->vertexattrib[1].buffer, glstate->vao->vertexattrib[1].real_buffer, glstate->vao->vertexattrib[2].pointer, glstate->vao->vertexattrib[2].real_pointer, glstate->vao->vertexattrib[2].buffer, glstate->vao->vertexattrib[2].real_buffer, GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 0), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 1), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 2), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 3), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 0), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 1), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 2), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 3));
++    static unsigned gua_scene_vertex_dump;
++    if (getenv("GUA_VERTEX_TRACE") && gua_scene_vertex_dump == 0 && glstate->glsl && glstate->glsl->program == 18 && mode == GL_TRIANGLES && count >= 6 && glstate->vao->vertexattrib[ATT_VERTEX].enabled && glstate->vao->vertexattrib[2].enabled && glstate->vao->vertexattrib[ATT_VERTEX].buffer == 0 && glstate->vao->vertexattrib[2].buffer == 0 && glstate->vao->vertexattrib[ATT_VERTEX].pointer && glstate->vao->vertexattrib[2].pointer && (uintptr_t)glstate->vao->vertexattrib[ATT_VERTEX].pointer > 0x10000 && (uintptr_t)glstate->vao->vertexattrib[2].pointer > 0x10000) {
++        const vertexattrib_t *vp = &glstate->vao->vertexattrib[ATT_VERTEX];
++        const vertexattrib_t *cp = &glstate->vao->vertexattrib[2];
++        unsigned n = count < 6 ? count : 6;
++        float xmin = 1e30f, ymin = 1e30f, xmax = -1e30f, ymax = -1e30f;
++        fprintf(stderr, "GUA-VERTEX-TRACE program=18 count=%d index_type=%s vp=%p cp=%p stride=%d/%d len=%u\\n", count, sindices ? "ushort" : "uint", vp->pointer, cp->pointer, vp->stride, cp->stride, len);
++        for (unsigned j=0; j<n; ++j) {
++            unsigned idx = sindices ? sindices[j] : (iindices ? iindices[j] : j);
++            if (idx >= len) { fprintf(stderr, "GUA-VERTEX-SKIP idx=%u out_of_range len=%u\\n", idx, len); continue; }
++            const unsigned char *pp = (const unsigned char*)vp->pointer + (size_t)idx * (vp->stride ? vp->stride : vp->size * sizeof(float));
++            const unsigned char *cc = (const unsigned char*)cp->pointer + (size_t)idx * (cp->stride ? cp->stride : 4);
++            const float *pf = (const float*)pp;
++            const unsigned char *cb = cc;
++            if (pf[0] < xmin) xmin=pf[0]; if (pf[0] > xmax) xmax=pf[0];
++            if (pf[1] < ymin) ymin=pf[1]; if (pf[1] > ymax) ymax=pf[1];
++            fprintf(stderr, "GUA-VERTEX idx=%u pos=(%.9g,%.9g,%.9g,%.9g) color=(%u,%u,%u,%u)\\n", idx, pf[0], pf[1], pf[2], pf[3], cb[0], cb[1], cb[2], cb[3]);
++        }
++        fprintf(stderr, "GUA-DRAW-COVERAGE program=18 ndc_bbox=(%.9g,%.9g)-(%.9g,%.9g)\\n", xmin, ymin, xmax, ymax);
++        gua_scene_vertex_dump = 1;
++    } else if (getenv("GUA_VERTEX_TRACE") && gua_scene_vertex_dump == 0 && glstate->glsl && glstate->glsl->program == 18) {
++        fprintf(stderr, "GUA-VERTEX-SKIP program=18 unsafe_or_nonclient_arrays\\n");
++        gua_scene_vertex_dump = 1;
++    }
+     if (glstate->raster.bm_drawing)
+         bitmap_flush();
+     DBG(printf("glDrawElementsCommon(%s, %d, %d, %d, %p, %p, %d)\n", PrintEnum(mode), first, count, len, sindices, iindices, instancecount);)
+@@ -424,10 +465,24 @@ if(count>500000) return;
+ 
+         // POLYGON mode as LINE is "intercepted" and drawn using list
+         if(instancecount==1 || hardext.esversion==1) {
++            if (getenv("GUA_TEXTURE_GENERATION_TRACE") && glstate->glsl && glstate->glsl->program == 86) {
++                for (int gua_u=0; gua_u<3; ++gua_u) {
++                    gltexture_t *gua_st = glstate->texture.bound[gua_u][ENABLED_TEX2D];
++                    gua_tex_diag_sample(gua_st, glstate->glsl->program, 0, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, gua_u);
++                }
++            }
++            if (getenv("GUA_ENABLE_PIXEL_TRANSITION_TRACE") && glstate->glsl && (glstate->glsl->program == 2 || glstate->glsl->program == 18 || glstate->glsl->program == 86))
++                gua_pixel_trace("PIXEL_BEFORE_DRAW");
+             if(!iindices && !sindices)
+                 gles_glDrawArrays(mode, first, count);
+             else
+                 gles_glDrawElements(mode, count, (sindices)?GL_UNSIGNED_SHORT:GL_UNSIGNED_INT, (sindices?((void*)sindices):((void*)iindices)));
++                gua_pixel_trace("PIXEL_AFTER_DRAW");
++                if (getenv("GUA_DRAW_ERROR_WINDOW") && glstate->glsl && (glstate->glsl->program == 2 || glstate->glsl->program == 22)) {
++                    LOAD_GLES2(glGetError);
++                    GLenum gua_draw_error = gles_glGetError ? gles_glGetError() : 0xffff;
++                    fprintf(stderr, "GUA-DRAW-IMMEDIATE-ERROR program=%u api=%s error=0x%x\\n", glstate->glsl->program, (!iindices && !sindices) ? "glDrawArrays" : "glDrawElements", gua_draw_error);
++                }
+         } else {
+             if(!iindices && !sindices)
+                 fpe_glDrawArraysInstanced(mode, first, count,instancecount);
+@@ -455,7 +510,8 @@ if(count>500000) return;
+ #define MAX_BATCH  globals4es.maxbatch
+ 
+ void APIENTRY_GL4ES gl4es_glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
+-    DBG(printf("glDrawRangeElements(%s, %i, %i, %i, %s, @%p), inlist=%i, pending=%d\n", PrintEnum(mode), start, end, count, PrintEnum(type), indices, (glstate->list.active)?1:0, glstate->list.pending);)
++    GUA_DRAW_TRACE("RANGE mode=0x%x start=%u end=%u count=%d type=0x%x logical_fbo=%u", mode, start, end, count, type, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
++    DBG(printf("glDrawRangeElements(%s, %i, %i, %i, %s, @%p), inlist=%i, pending=%d\\n", PrintEnum(mode), start, end, count, PrintEnum(type), indices, (glstate->list.active)?1:0, glstate->list.pending);)
+     count = adjust_vertices(mode, count);
+     
+     if (count<0) {
+@@ -559,7 +615,8 @@ AliasExport(void,glDrawRangeElements,EXT,(GLenum mode,GLuint start,GLuint end,GL
+ 
+ 
+ void APIENTRY_GL4ES gl4es_glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices) {
+-    DBG(printf("glDrawElements(%s, %d, %s, %p), vtx=%p map=%p, pending=%d\n", PrintEnum(mode), count, PrintEnum(type), indices, (glstate->vao->vertex)?glstate->vao->vertex->data:NULL, (glstate->vao->elements)?glstate->vao->elements->data:NULL, glstate->list.pending);)
++    GUA_DRAW_TRACE("ELEMENTS mode=0x%x count=%d type=0x%x logical_fbo=%u", mode, count, type, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
++    DBG(printf("glDrawElements(%s, %d, %s, %p), vtx=%p map=%p, pending=%d\\n", PrintEnum(mode), count, PrintEnum(type), indices, (glstate->vao->vertex)?glstate->vao->vertex->data:NULL, (glstate->vao->elements)?glstate->vao->elements->data:NULL, glstate->list.pending);)
+     // TODO: split for count > 65535?
+     // special check for QUADS and TRIANGLES that need multiple of 4 or 3 vertex...
+     count = adjust_vertices(mode, count);
+diff --git a/src/gl/framebuffers.c b/src/gl/framebuffers.c
+index 93194fc..de70c45 100644
+--- a/src/gl/framebuffers.c
++++ b/src/gl/framebuffers.c
+@@ -7,7 +7,68 @@
+ #include "gl4es.h"
+ #include "glstate.h"
+ #include "init.h"
++#include <stdio.h>
++#include <unistd.h>
++
++static unsigned gua_attach_step_events;
++#define GUA_ATTACH_STEP(fmt, ...) do { \
++    if (gua_attach_step_events < 256) \
++        fprintf(stderr, "GUA-ATTACH-STEP n=%u " fmt "\\n", ++gua_attach_step_events, ##__VA_ARGS__); \
++} while (0)
++static unsigned gua_fbo_trace_events;
++static GLuint gua_last_blit_draw_texture;
++static GLuint gua_last_blit_draw_fbo;
++#define GUA_FBO_TRACE(fmt, ...) do { \
++    if (gua_fbo_trace_events < 4096) \
++        fprintf(stderr, "GUA-FBO n=%u " fmt "\\n", ++gua_fbo_trace_events, ##__VA_ARGS__); \
++} while (0)
+ #include "loader.h"
++static unsigned gua_pipe_seq;
++void gua_pipeline_event(const char *event, GLenum target, GLuint requested) {
++    if (gua_pipe_seq >= 2048 || !glstate)
++        return;
++    LOAD_GLES2_OR_OES(glGetIntegerv);
++    GLint native = -1;
++    gles_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &native);
++    GUA_FBO_TRACE("PIPE seq=%u event=%s target=0x%x requested=%u current=%u draw=%u read=%u native=%d main=%u", ++gua_pipe_seq, event, target, requested, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, glstate->fbo.fbo_draw ? glstate->fbo.fbo_draw->id : 0, glstate->fbo.fbo_read ? glstate->fbo.fbo_read->id : 0, native, glstate->fbo.mainfbo_fbo);
++}
++static unsigned gua_pixel_events;
++void gua_pixel_trace(const char *tag) {
++    if (getenv("GUA_ENABLE_PIXEL_TRACE") == NULL && getenv("GUA_ENABLE_PIXEL_TRANSITION_TRACE") == NULL)
++        return;
++    if (gua_pixel_events >= 128 || !glstate || !glstate->fbo.current_fb)
++        return;
++    LOAD_GLES2_OR_OES(glGetIntegerv);
++    LOAD_GLES(glReadPixels);
++    LOAD_GLES(glGetBooleanv);
++    LOAD_GLES(glIsEnabled);
++    LOAD_GLES(glActiveTexture);
++    GLint native = -1, vp[4] = {0}, sc[4] = {0}, prog = 0, active = 0, tex0 = 0, tex1 = 0, tex2 = 0, ab = 0, eb = 0;
++    GLboolean mask[4] = {0};
++    GLubyte p[4] = {0, 0, 0, 0};
++    gles_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &native);
++    gles_glGetIntegerv(GL_VIEWPORT, vp);
++    gles_glGetIntegerv(GL_SCISSOR_BOX, sc);
++    gles_glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
++    gles_glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
++    gles_glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex0);
++    if (gles_glActiveTexture) {
++        gles_glActiveTexture(GL_TEXTURE0);
++        gles_glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex0);
++        gles_glActiveTexture(GL_TEXTURE1);
++        gles_glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex1);
++        gles_glActiveTexture(GL_TEXTURE2);
++        gles_glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex2);
++        gles_glActiveTexture((GLenum)active);
++    }
++    gles_glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &ab);
++    gles_glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &eb);
++    gles_glGetBooleanv(GL_COLOR_WRITEMASK, mask);
++    GLboolean blend = gles_glIsEnabled(GL_BLEND), depth = gles_glIsEnabled(GL_DEPTH_TEST), cull = gles_glIsEnabled(GL_CULL_FACE), scissors = gles_glIsEnabled(GL_SCISSOR_TEST);
++    gles_glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, p);
++    GUA_FBO_TRACE("%s seq=%u logical=%u draw=%u read=%u native=%d rgba=%u,%u,%u,%u vp=%d,%d,%d,%d sc=%d,%d,%d,%d scissor=%d mask=%d%d%d%d blend=%d depth=%d cull=%d prog=%d active=0x%x tex0=%d tex1=%d tex2=%d ab=%d eb=%d", tag, ++gua_pixel_events, glstate->fbo.current_fb->id, glstate->fbo.fbo_draw->id, glstate->fbo.fbo_read->id, native, p[0], p[1], p[2], p[3], vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3], scissors, mask[0], mask[1], mask[2], mask[3], blend, depth, cull, prog, active, tex0, ab, eb);
++}
++
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -48,6 +109,7 @@ glframebuffer_t* get_framebuffer(GLenum target) {
+ 
+ 
+ void readfboBegin() {
++    gua_pipeline_event("readfboBegin.entry", 0, 0);
+     if (glstate->fbo.fbo_read == glstate->fbo.fbo_draw)
+         return;
+     DBG(printf("readfboBegin, fbo status read=%u, draw=%u, main=%u, current=%u\n", glstate->fbo.fbo_read->id, glstate->fbo.fbo_draw->id, glstate->fbo.mainfbo_fbo, glstate->fbo.current_fb->id);)
+@@ -59,9 +121,11 @@ void readfboBegin() {
+         fbo = glstate->fbo.mainfbo_fbo;
+     LOAD_GLES2_OR_OES(glBindFramebuffer);
+     gles_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
++    gua_pipeline_event("readfboBegin.exit", GL_FRAMEBUFFER, fbo);
+ }
+ 
+ void readfboEnd() {
++    gua_pipeline_event("readfboEnd.entry", 0, 0);
+     if (glstate->fbo.fbo_read->id == glstate->fbo.fbo_draw->id)
+         return;
+     DBG(printf("readfboEnd, fbo status read=%p, draw=%p, main=%u, current=%p\n", glstate->fbo.fbo_read, glstate->fbo.fbo_draw, glstate->fbo.mainfbo_fbo, glstate->fbo.current_fb);)
+@@ -99,8 +163,9 @@ void APIENTRY_GL4ES gl4es_glGenFramebuffers(GLsizei n, GLuint *ids) {
+     noerrorShim();
+     if(n-m) {
+         errorGL();
+-        gles_glGenFramebuffers(n-m, ids+m);
++    gles_glGenFramebuffers(n-m, ids+m);
+     }
++    GUA_FBO_TRACE("GEN n=%d first=%u", n, (n > 0 && ids) ? ids[0] : 0);
+     // track the framebuffers...
+     int ret;
+     khint_t k;
+@@ -199,6 +264,9 @@ GLboolean APIENTRY_GL4ES gl4es_glIsFramebuffer(GLuint framebuffer) {
+ 
+ GLenum APIENTRY_GL4ES gl4es_glCheckFramebufferStatus(GLenum target) {
+     GLenum result;
++    LOAD_GLES2_OR_OES(glGetIntegerv);
++    GLint native_binding = 0;
++    gles_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &native_binding);
+     if(glstate->fbo.internal) {
+         result = glstate->fbo.fb_status;
+         noerrorShim();
+@@ -213,12 +281,13 @@ GLenum APIENTRY_GL4ES gl4es_glCheckFramebufferStatus(GLenum target) {
+             rtarget = GL_FRAMEBUFFER;
+         result = gles_glCheckFramebufferStatus(rtarget);
+      }
+-    DBG(printf("glCheckFramebufferStatus(0x%04X)=0x%04X\n", target, result);)
++    GUA_FBO_TRACE("CHECK target=0x%x native=%d current=%u draw=%u read=%u internal=%d cached=0x%x status=0x%x color0=%u/t0x%x depth=%u/t0x%x stencil=%u/t0x%x", target, native_binding, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, glstate->fbo.fbo_draw ? glstate->fbo.fbo_draw->id : 0, glstate->fbo.fbo_read ? glstate->fbo.fbo_read->id : 0, glstate->fbo.internal, glstate->fbo.fb_status, result, glstate->fbo.current_fb ? glstate->fbo.current_fb->color[0] : 0, glstate->fbo.current_fb ? glstate->fbo.current_fb->t_color[0] : 0, glstate->fbo.current_fb ? glstate->fbo.current_fb->depth : 0, glstate->fbo.current_fb ? glstate->fbo.current_fb->t_depth : 0, glstate->fbo.current_fb ? glstate->fbo.current_fb->stencil : 0, glstate->fbo.current_fb ? glstate->fbo.current_fb->t_stencil : 0);
+     return result;
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glBindFramebuffer(GLenum target, GLuint framebuffer) {
+-    DBG(printf("glBindFramebuffer(%s, %u), list=%s, glstate->fbo.current_fb=%d (draw=%d, read=%d)\n", PrintEnum(target), framebuffer, glstate->list.active?"active":"none", glstate->fbo.current_fb->id, glstate->fbo.fbo_draw->id, glstate->fbo.fbo_read->id);)
++    gua_pipeline_event("BindFramebuffer.entry", target, framebuffer);
++    GUA_FBO_TRACE("BIND target=0x%x id=%u before=%u", target, framebuffer, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
+     PUSH_IF_COMPILING(glBindFramebuffer);
+     LOAD_GLES2_OR_OES(glBindFramebuffer);
+ //    LOAD_GLES2_OR_OES(glCheckFramebufferStatus);
+@@ -261,11 +330,13 @@ void APIENTRY_GL4ES gl4es_glBindFramebuffer(GLenum target, GLuint framebuffer) {
+     gles_glBindFramebuffer(target, framebuffer);
+     GLenum err=gles_glGetError();
+     errorShim(err);
++    gua_pipeline_event("BindFramebuffer.exit", target, framebuffer);
+     
+ //    glstate->fbo.fb_status = (framebuffer==0)?GL_FRAMEBUFFER_COMPLETE:gles_glCheckFramebufferStatus(target);
+ }
+ 
+ GLenum ReadDraw_Push(GLenum target) {
++    gua_pipeline_event("ReadDraw_Push.entry", target, 0);
+     if(target==GL_FRAMEBUFFER)
+         return GL_FRAMEBUFFER;
+     LOAD_GLES2_OR_OES(glBindFramebuffer);
+@@ -282,6 +353,7 @@ GLenum ReadDraw_Push(GLenum target) {
+     return target;
+ }
+ void ReadDraw_Pop(GLenum target) {
++    gua_pipeline_event("ReadDraw_Pop.entry", target, 0);
+     if(target==GL_FRAMEBUFFER)
+         return;
+     LOAD_GLES2_OR_OES(glBindFramebuffer);
+@@ -423,7 +495,6 @@ int GetAttachmentLevel(glframebuffer_t* fb, GLenum attachment) {
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) {
+-    DBG(printf("glFramebufferTexture2D(%s, %s, %s, %u, %i) glstate->fbo.current_fb=%d (draw=%d, read=%d)\n", PrintEnum(target), PrintEnum(attachment), PrintEnum(textarget), texture, level, glstate->fbo.current_fb->id, glstate->fbo.fbo_draw->id, glstate->fbo.fbo_read->id);)
+     static GLuint scrap_tex = 0;
+     static int scrap_width = 0;
+     static int scrap_height = 0;
+@@ -432,14 +503,19 @@ void APIENTRY_GL4ES gl4es_glFramebufferTexture2D(GLenum target, GLenum attachmen
+     LOAD_GLES(glTexImage2D);
+     LOAD_GLES(glBindTexture);
+     LOAD_GLES(glActiveTexture);
++    LOAD_GLES2_OR_OES(glGetFramebufferAttachmentParameteriv);
++    LOAD_GLES(glGetIntegerv);
++    GUA_ATTACH_STEP("PTR fb=%p teximage=%p bindtex=%p active=%p check=%p getint=%p", (void*)gles_glFramebufferTexture2D, (void*)gles_glTexImage2D, (void*)gles_glBindTexture, (void*)gles_glActiveTexture, (void*)gles_glGetFramebufferAttachmentParameteriv, (void*)gles_glGetIntegerv);
+     void gles_glTexParameteri(glTexParameteri_ARG_EXPAND); //LOAD_GLES(glTexParameteri);
+-
+     glframebuffer_t *fb = get_framebuffer(target);
++    GUA_ATTACH_STEP("ENTRY fb=%u attachment=0x%x tex=%u level=%d", fb ? fb->id : 0, attachment, texture, level);
++    GUA_FBO_TRACE("ATTACH_TEX fbo=%u attachment=0x%x target=0x%x tex=%u level=%d", fb ? fb->id : 0, attachment, textarget, texture, level);
+     if(!fb) {
+         errorShim(GL_INVALID_ENUM);
+         return;
+     }
+ 
++    GUA_ATTACH_STEP("VALIDATE fb=%u attachment=0x%x maxcolorattach=%d", fb ? fb->id : 0, attachment, hardext.maxcolorattach);
+     if( !(attachment>=GL_COLOR_ATTACHMENT0 && attachment<(GL_COLOR_ATTACHMENT0+hardext.maxcolorattach))
+      && attachment!=GL_DEPTH_ATTACHMENT 
+      && attachment!=GL_STENCIL_ATTACHMENT 
+@@ -452,7 +528,10 @@ void APIENTRY_GL4ES gl4es_glFramebufferTexture2D(GLenum target, GLenum attachmen
+     // find texture and get it's real name
+     gltexture_t *tex = NULL;
+     if (texture) {
++        (void)write(2, "GUA-ATTACH-RAW BEFORE_GET\n", 25);
+         tex = gl4es_getTexture(textarget, texture);
++        (void)write(2, "GUA-ATTACH-RAW AFTER_GET\n", 24);
++        GUA_ATTACH_STEP("AFTER_GET fb=%u guest=%u texptr=%p guest_field=%u native=%u", fb->id, texture, (void*)tex, tex ? tex->texture : 0, tex ? tex->glname : 0);
+ 
+         if (!tex) {
+             LOGE("texture for FBO not found, name=%u\n", texture);
+@@ -543,7 +622,9 @@ void APIENTRY_GL4ES gl4es_glFramebufferTexture2D(GLenum target, GLenum attachmen
+         }
+     }
+     
++    GUA_ATTACH_STEP("BEFORE_PUSH fb=%u target=0x%x texguest=%u texnative=%u", fb->id, target, tex ? tex->texture : texture, tex ? tex->glname : texture);
+     GLenum ntarget = ReadDraw_Push(target);
++    GUA_ATTACH_STEP("AFTER_PUSH fb=%u ntarget=0x%x", fb->id, ntarget);
+ 
+     GLuint old_attachment = GetAttachment(fb, attachment);
+     GLuint old_attachment_type = GetAttachmentType(fb, attachment);
+@@ -562,16 +643,20 @@ void APIENTRY_GL4ES gl4es_glFramebufferTexture2D(GLenum target, GLenum attachmen
+         DBG(printf("Attach Texture %d to FBO %d as Attachement %s\n", tex->glname, fb->id, PrintEnum(attachment));)
+         tex->binded_fbo = fb->id;
+         tex->binded_attachment = attachment;
++        if (getenv("GUA_TEXTURE_GENERATION_TRACE")) fprintf(stderr, "GUA-FBO-ATTACH fbo_logical=%u attachment=0x%x texture_logical=%u texture_ptr=%p texture_glname=%u level=%d\\n", fb->id, attachment, tex->texture, (void*)tex, tex->glname, level);
+     }
+ 
++    GUA_ATTACH_STEP("BEFORE_SKIP fb=%u old=%u/t0x%x guest=%u native=%u", fb->id, old_attachment, old_attachment_type, tex ? tex->texture : texture, tex ? tex->glname : texture);
+     if ((old_attachment_type == textarget) && (old_attachment == (tex?tex->texture:texture)))
+     {
+-        // no need to reattach
++        GUA_FBO_TRACE("ATTACH_SKIP fb=%u old=%u/t0x%x guest=%u native=%u", fb->id, old_attachment, old_attachment_type, tex ? tex->texture : texture, tex ? tex->glname : texture);
+         noerrorShim();
+         return;
+     }
+ 
+     SetAttachment(fb, attachment, textarget, tex?tex->texture:texture, level);
++    GUA_ATTACH_STEP("AFTER_SET fb=%u color0=%u/t0x%x guest=%u native=%u", fb->id, fb->color[0], fb->t_color[0], tex ? tex->texture : texture, tex ? tex->glname : texture);
++    GUA_FBO_TRACE("ATTACH_STATE fb=%u color0=%u/t0x%x depth=%u/t0x%x stencil=%u/t0x%x tex_guest=%u tex_native=%u", fb->id, fb->color[0], fb->t_color[0], fb->depth, fb->t_depth, fb->stencil, fb->t_stencil, tex ? tex->texture : 0, tex ? tex->glname : texture);
+ 
+     if(attachment>=GL_COLOR_ATTACHMENT0 && attachment<(GL_COLOR_ATTACHMENT0+hardext.maxcolorattach) && tex) {
+         gltexture_t *bound = glstate->texture.bound[0/*glstate->texture.active*/][ENABLED_TEX2D];
+@@ -803,6 +888,11 @@ void APIENTRY_GL4ES gl4es_glFramebufferTexture2D(GLenum target, GLenum attachmen
+     if(textarget>=GL_TEXTURE_CUBE_MAP_POSITIVE_X && textarget<GL_TEXTURE_CUBE_MAP_POSITIVE_X+6)
+         realtarget = textarget;
+     gles_glFramebufferTexture2D(ntarget, attachment, realtarget, texture, 0);
++    GLint post_type=0, post_name=0, post_binding=0;
++    gles_glGetFramebufferAttachmentParameteriv(ntarget, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &post_type);
++    gles_glGetFramebufferAttachmentParameteriv(ntarget, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &post_name);
++    gles_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &post_binding);
++    GUA_FBO_TRACE("TEX_ATTACH_POST logical=%u guest=%u native=%u ntarget=0x%x attachment=0x%x type=0x%x name=%d binding=%d", fb->id, texture, tex ? tex->glname : 0, ntarget, attachment, post_type, post_name, post_binding);
+     DBG(CheckGLError(1);)
+     ReadDraw_Pop(target);
+ }
+@@ -820,6 +910,7 @@ void APIENTRY_GL4ES gl4es_glGenRenderbuffers(GLsizei n, GLuint *renderbuffers) {
+     LOAD_GLES2_OR_OES(glGenRenderbuffers);
+     errorGL();
+     gles_glGenRenderbuffers(n, renderbuffers);
++    GUA_FBO_TRACE("GEN_RB n=%d first=%u", n, (n > 0 && renderbuffers) ? renderbuffers[0] : 0);
+     // track the renderbuffers...
+     int ret;
+     khint_t k;
+@@ -833,10 +924,11 @@ void APIENTRY_GL4ES gl4es_glGenRenderbuffers(GLsizei n, GLuint *renderbuffers) {
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) {
+-    DBG(printf("glFramebufferRenderbuffer(%s, %s, %s, %u)\n", PrintEnum(target), PrintEnum(attachment), PrintEnum(renderbuffertarget), renderbuffer);)
++    GUA_FBO_TRACE("ATTACH_RB target=0x%x attachment=0x%x rbtarget=0x%x id=%u", target, attachment, renderbuffertarget, renderbuffer);
+     LOAD_GLES2_OR_OES(glFramebufferRenderbuffer);
+     LOAD_GLES2_OR_OES(glGetFramebufferAttachmentParameteriv);
+     LOAD_GLES(glGetError);
++    LOAD_GLES(glGetIntegerv);
+ 
+     glframebuffer_t *fb = get_framebuffer(target);
+     if(!fb) {
+@@ -929,6 +1021,11 @@ void APIENTRY_GL4ES gl4es_glFramebufferRenderbuffer(GLenum target, GLenum attach
+ 
+     errorGL();
+     gles_glFramebufferRenderbuffer(ntarget, attachment, renderbuffertarget, renderbuffer);
++    GLint post_type=0, post_name=0, post_binding=0;
++    gles_glGetFramebufferAttachmentParameteriv(ntarget, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &post_type);
++    gles_glGetFramebufferAttachmentParameteriv(ntarget, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &post_name);
++    gles_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &post_binding);
++    GUA_FBO_TRACE("RB_ATTACH_POST logical=%u native=%u ntarget=0x%x attachment=0x%x type=0x%x name=%d binding=%d", fb->id, renderbuffer, ntarget, attachment, post_type, post_name, post_binding);
+     DBG(CheckGLError(1);)
+     ReadDraw_Pop(target);
+ }
+@@ -966,10 +1063,11 @@ void APIENTRY_GL4ES gl4es_glDeleteRenderbuffers(GLsizei n, GLuint *renderbuffers
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glRenderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
+-    DBG(printf("glRenderbufferStorage(%s, %s, %i, %i)\n", PrintEnum(target), PrintEnum(internalformat), width, height);)
++    GUA_FBO_TRACE("RB_STORAGE target=0x%x fmt=0x%x w=%d h=%d", target, internalformat, width, height);
+     LOAD_GLES2_OR_OES(glRenderbufferStorage);
+     LOAD_GLES2_OR_OES(glGenRenderbuffers);
+     LOAD_GLES2_OR_OES(glBindRenderbuffer);
++    LOAD_GLES2_OR_OES(glGetRenderbufferParameteriv);
+ 
+     glrenderbuffer_t *rend = glstate->fbo.current_rb;
+     if(!rend->renderbuffer) {
+@@ -1051,6 +1149,11 @@ void APIENTRY_GL4ES gl4es_glRenderbufferStorage(GLenum target, GLenum internalfo
+     rend->actual = internalformat;
+ 
+     gles_glRenderbufferStorage(target, internalformat, width, height);
++    GLint qwidth=0, qheight=0, qformat=0;
++    gles_glGetRenderbufferParameteriv(target, GL_RENDERBUFFER_WIDTH, &qwidth);
++    gles_glGetRenderbufferParameteriv(target, GL_RENDERBUFFER_HEIGHT, &qheight);
++    gles_glGetRenderbufferParameteriv(target, GL_RENDERBUFFER_INTERNAL_FORMAT, &qformat);
++    GUA_FBO_TRACE("RB_STORAGE_POST logical=%u native=%u requested=0x%x actual=0x%x w=%d h=%d", rend->renderbuffer, rend->renderbuffer, internalformat, qformat, qwidth, qheight);
+     DBG(CheckGLError(1);)
+ }
+ 
+@@ -1305,6 +1408,7 @@ void createMainFBO(int width, int height) {
+ }
+ 
+ void blitMainFBO(int x, int y, int width, int height) {
++    GUA_FBO_TRACE("MAIN_BLIT mainfbo=%u tex=%u current=%u draw=%u read=%u xy=%d,%d size=%u,%u", glstate->fbo.mainfbo_fbo, glstate->fbo.mainfbo_tex, glstate->fbo.current_fb->id, glstate->fbo.fbo_draw->id, glstate->fbo.fbo_read->id, x, y, width, height);
+     if (glstate->fbo.mainfbo_fbo==0)
+         return;
+ 
+@@ -1356,6 +1460,36 @@ void unbindMainFBO() {
+     }
+ }
+ 
++EXPORT
++void gl4es_SDL_PresentCurrent(void) {
++    if (!glstate)
++        return;
++    if (glstate->fbo.mainfbo_fbo) {
++        unbindMainFBO();
++        blitMainFBO(0, 0, 0, 0);
++        return;
++    }
++    glframebuffer_t *src = glstate->fbo.fbo_draw;
++    GLuint guest_tex = src ? src->color[0] : 0;
++    if (!guest_tex)
++        guest_tex = gua_last_blit_draw_texture;
++    if (!guest_tex)
++        return;
++    gltexture_t *tex = gl4es_getTexture(GL_TEXTURE_2D, guest_tex);
++    if (!tex)
++        return;
++    LOAD_GLES2_OR_OES(glBindFramebuffer);
++    LOAD_GLES(glReadPixels);
++    GLubyte sample[4] = {0, 0, 0, 0};
++    gles_glBindFramebuffer(GL_FRAMEBUFFER, gua_last_blit_draw_fbo);
++    gles_glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, sample);
++    GUA_FBO_TRACE("PRESENT_SAMPLE fbo=%u rgba=%u,%u,%u,%u", gua_last_blit_draw_fbo, sample[0], sample[1], sample[2], sample[3]);
++    GUA_FBO_TRACE("DIRECT_PRESENT src_fbo=%u guest=%u native=%u size=%ux%u", src->id, guest_tex, tex->glname, tex->nwidth, tex->nheight);
++    gl4es_glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    gl4es_glViewport(0, 0, glstate->fbowidth, glstate->fboheight);
++    gl4es_blitTexture(tex->glname, 0, 0, tex->nwidth, tex->nheight, tex->nwidth, tex->nheight, 1, 1, 0, 0, 0, 0, BLIT_OPAQUE);
++}
++
+ void deleteMainFBO(void *state) {
+     LOAD_GLES2_OR_OES(glDeleteFramebuffers);
+     LOAD_GLES2_OR_OES(glDeleteRenderbuffers);
+@@ -1391,6 +1525,22 @@ void APIENTRY_GL4ES gl4es_glFramebufferTextureLayer(    GLenum target, GLenum at
+ void gl4es_SwapBuffers_currentContext();    // defined in glx/glx.c
+ #endif
+ void APIENTRY_GL4ES gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) {
++    if (getenv("GUA_RESOLVE_INTENT_TRACE") && getenv("GUA_ENABLE_PIXEL_TRACE") && glstate && glstate->fbo.fbo_read && glstate->fbo.fbo_draw) {
++        LOAD_GLES2_OR_OES(glBindFramebuffer);
++        gles_glBindFramebuffer(GL_FRAMEBUFFER, 0);
++        gua_pixel_trace("GUA-PRE-RESOLVE-FBO0");
++        gles_glBindFramebuffer(GL_FRAMEBUFFER, glstate->fbo.fbo_read->id);
++        gua_pixel_trace("GUA-PRE-RESOLVE-FBO1");
++        gles_glBindFramebuffer(GL_FRAMEBUFFER, glstate->fbo.fbo_draw->id);
++    }
++    if (getenv("GUA_ENABLE_PIXEL_TRACE") && glstate && glstate->fbo.current_fb && glstate->fbo.fbo_read) {
++        GLenum gua_rd_target = ReadDraw_Push(GL_READ_FRAMEBUFFER);
++        gua_pixel_trace("GUA-SOURCE-BEFORE-BLIT");
++        ReadDraw_Pop(GL_READ_FRAMEBUFFER);
++        (void)gua_rd_target;
++    }
++    gua_last_blit_draw_fbo = (glstate && glstate->fbo.fbo_draw) ? glstate->fbo.fbo_draw->id : 0;
++    gua_last_blit_draw_texture = (glstate && glstate->fbo.fbo_draw) ? glstate->fbo.fbo_draw->color[0] : 0;    GUA_FBO_TRACE("BLIT src=%d,%d-%d,%d dst=%d,%d-%d,%d mask=0x%x filter=0x%x read=%u draw=%u", srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter, glstate->fbo.fbo_read->id, glstate->fbo.fbo_draw->id);
+     // mask will be ignored
+     // filter will be taken only for ReadFBO has no Texture attached (so readpixel is used)
+     DBG(printf("glBlitFramebuffer(%d, %d, %d, %d,  %d, %d, %d, %d,  0x%04X, %s) fbo_read=%d, fbo_draw=%d\n",
+@@ -1456,6 +1606,7 @@ void APIENTRY_GL4ES gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX
+             nheight = srcY1;
+         }
+     }
++    GUA_FBO_TRACE("BLIT_TEX read=%u draw=%u guest_tex=%u native_tex=%u size=%.0fx%.0f created=%d", glstate->fbo.fbo_read->id, glstate->fbo.fbo_draw->id, texture, glname, nwidth, nheight, created);
+     float srcW = srcX1-srcX0;
+     float srcH = srcY1-srcY0;
+     float zoomx = ((float)(dstX1-dstX0))/srcW;
+@@ -1486,7 +1637,14 @@ void APIENTRY_GL4ES gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX
+     GLint vp[4];
+     memcpy(vp, &glstate->raster.viewport, sizeof(vp));
+     gl4es_glViewport(0, 0, fbowidth, fboheight);
++    gua_pixel_trace("PIXEL_PRE_BLIT");
+     gl4es_blitTexture(glname, srcX0, srcY0, srcW, srcH, nwidth, nheight, zoomx, zoomy, 0, 0, dstX0, dstY0, BLIT_OPAQUE);
++    if (getenv("GUA_TEXTURE_GENERATION_TRACE") && glstate->fbo.fbo_draw->color[0]) {
++        gltexture_t *gua_dst = gl4es_getTexture(glstate->fbo.fbo_draw->t_color[0], glstate->fbo.fbo_draw->color[0]);
++        gua_tex_diag_writer(gua_dst, "BLIT", glstate->glsl ? glstate->glsl->program : 0, 0, glstate->fbo.fbo_draw->id);
++        if (getenv("GUA_ENABLE_PIXEL_TRACE") && gua_dst) gua_pixel_trace("GUA-SOURCE-AFTER-WRITER");
++    }
++    gua_pixel_trace("PIXEL_POST_BLIT");
+     gl4es_glViewport(vp[0], vp[1], vp[2], vp[3]);
+     if(created) {
+         gl4es_glDeleteTextures(1, &texture);
