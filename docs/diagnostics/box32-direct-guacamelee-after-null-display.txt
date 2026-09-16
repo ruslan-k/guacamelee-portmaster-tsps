@@ -1,7 +1,37 @@
 # Guacamelee after NULL-Display fix
 
-Status: NOT RUN.
+Date: 2026-09-16
+Box64: `ac602ca9aac22aaad86951b6fb0a68a62f08b4ee9ffd7ff2823a946267fc2d00`
 
-The generic `addDisplay(NULL)` Box64 patch has not yet produced a deployable binary because the Ubuntu 20.04 cross-toolchain container stalled during package installation. Therefore the direct launcher was not changed to remove the X11 stub and Guacamelee was not retested after the fix.
+The new Box64 was run from an isolated temporary path with:
 
-Last pre-fix evidence is in `box32-direct-pr2.txt`: SDL window/context and GL string/proc enumeration succeeded, then `glXGetCurrentDisplay` returned NULL through the gl4es NOX11/GLX-stub path and Box64 crashed with exit code 139 before first draw or swap.
+```text
+GUACAMELEE_USE_X11_STUB=0
+GUACAMELEE_NATIVE_LD_LIBRARY_PATH=/usr/lib:/lib
+SDL_KMSDRM_REQUIRE_DRM_MASTER=1
+LIBGL_FB unset
+LIBGL_SHRINK unset
+BOX64_DLSYM_ERROR=1
+BOX64_WRAP_EGL=1
+```
+
+The run passed the previous boundary:
+
+```text
+glXGetProcAddress("glXGetCurrentDisplay") -> callable
+glXGetCurrentDisplay -> return 0x0
+```
+
+No X11 stub function was used. The game then reached shader bootstrap and failed at the next boundary:
+
+```text
+fopen64(".\\Shaders\\vs_2d_main.vsh", "r") -> ENOENT
+GetVertexShader(...) -> false
+assert at GVideoSys::GetVertexShader, line 8823
+fclose(NULL) -> Box64 SIGSEGV
+exit_code=139
+```
+
+The file is not present as a loose shader. `gamedata` contains `shaders.dat.ogl` (330406 bytes), while the direct working directory is the port root. No first game draw or visible title frame was reached in this run. This is now a shader asset/path or game shader-loader boundary, followed by a separate Box64 `fclose(NULL)` error-path crash; no additional workaround was added.
+
+The temporary direct process was terminated exactly and SpruceOS UI was restored afterward.

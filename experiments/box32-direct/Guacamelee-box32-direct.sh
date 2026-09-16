@@ -37,7 +37,7 @@ echo "uname=$(uname -a)"
 echo "platform=${PLATFORM:-unset} arch=${PLATFORM_ARCHITECTURE:-unset} cfw=${CFW_NAME:-unset}"
 echo "backend=box64-box32-aarch64-gl4es-direct"
 
-BOX64="$GAMEDIR/box32-direct/box64-box32-aarch64"
+BOX64="${GUACAMELEE_BOX64:-$GAMEDIR/box32-direct/box64-box32-aarch64}"
 GL4ES="$GAMEDIR/box32-direct/libGL.so.1"
 SCHEDSHIM="$GAMEDIR/box32-direct/libbox32_schedshim.so"
 X11STUB="$GAMEDIR/box32-direct/libX11.so.6"
@@ -45,7 +45,9 @@ GAME="$GAMEDIR/box32-direct/game-bin"
 [ -x "$BOX64" ] || { echo "missing Box64/Box32: $BOX64"; exit 2; }
 [ -f "$GL4ES" ] || { echo "missing AArch64 gl4es: $GL4ES"; exit 3; }
 [ -f "$SCHEDSHIM" ] || { echo "missing Box32 sched shim: $SCHEDSHIM"; exit 4; }
-[ -f "$X11STUB" ] || { echo "missing direct X11 dlopen stub: $X11STUB"; exit 5; }
+if [ "${GUACAMELEE_USE_X11_STUB:-0}" = 1 ]; then
+  [ -f "$X11STUB" ] || { echo "missing direct X11 dlopen stub: $X11STUB"; exit 5; }
+fi
 [ -f "$GAME" ] || { echo "missing game-bin: $GAME"; exit 6; }
 
 NATIVE_EGL=/usr/trimui/lib/libEGL.so.1
@@ -87,7 +89,7 @@ export BOX64_SHOWBT=1
 export BOX64_ROLLING_LOG=1
 export BOX64_WRAP_EGL=1
 export BOX64_LD_LIBRARY_PATH="$GAMEDIR/box86/x86:$GAMEDIR/gamedata/lib32:$GAMEDIR/libs/x86"
-export LD_LIBRARY_PATH="$GAMEDIR/box32-direct:/usr/lib:/lib"
+export LD_LIBRARY_PATH="${GUACAMELEE_NATIVE_LD_LIBRARY_PATH:-/usr/lib:/lib}"
 export LIBGL_GLES="$NATIVE_GLES"
 export LIBGL_EGL="$NATIVE_EGL"
 export LIBGL_ES=2

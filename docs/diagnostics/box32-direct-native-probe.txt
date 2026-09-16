@@ -1,6 +1,6 @@
 # Stage 1 native AArch64 SDL/KMSDRM probe
 
-Status: NOT RUN — build blocked before producing a binary.
+Status: STAGE 1 PASS under strict DRM-master ownership; historical non-strict run below is retained.
 
 The source is `experiments/box32-direct/src/native_probe.c`. It was updated to query `eglGetCurrentDisplay`, `eglGetCurrentContext`, `eglGetCurrentSurface(EGL_DRAW/READ)` after SDL context creation.
 

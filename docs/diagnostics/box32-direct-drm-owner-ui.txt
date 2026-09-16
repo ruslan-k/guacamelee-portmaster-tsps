@@ -1,0 +1,22 @@
+# DRM owner / UI evidence
+
+Date: 2026-09-16
+Device: TSPS / Longan
+
+Normal UI state:
+
+```text
+card0 opener: PID 20249 (later respawned as PID 22061)
+fd=4 -> /dev/dri/card0
+cmd=/mnt/SDCARD/spruce/flip/bin/MainUI /mnt/SDCARD/App/PyUI/main-ui/mainui.py -device TRIMUI_SMART_PRO_S ...
+```
+
+With MainUI alive, the direct ioctl DRM probe returned:
+
+```text
+DRM fd=3 setmaster_rc=-1 errno=16(Device or resource busy)
+```
+
+`principal.sh` supervises MainUI and respawns it if only MainUI is killed. For the controlled release test, the exact supervisor and current MainUI owner were stopped, then the `/proc/*/fd` scan showed no remaining `/dev/dri/card0` opener.
+
+No broad kill was used. After the tests, `principal.sh` and MainUI were restored and the target game/Box processes were absent.

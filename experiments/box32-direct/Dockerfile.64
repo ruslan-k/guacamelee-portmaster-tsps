@@ -15,6 +15,14 @@ RUN dpkg --add-architecture arm64 && \
       libegl1-mesa-dev:arm64 libgl1-mesa-dev:arm64 && \
     pip3 install --no-cache-dir 'cmake==3.22.6' && \
     rm -rf /var/lib/apt/lists/*
+RUN dpkg --add-architecture i386 && \
+    printf '%s\n' \
+      'deb [arch=i386] http://archive.ubuntu.com/ubuntu focal main restricted universe multiverse' \
+      'deb [arch=i386] http://archive.ubuntu.com/ubuntu focal-updates main restricted universe multiverse' \
+      >> /etc/apt/sources.list
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libgl1-mesa-dev:i386 file && \
+    rm -rf /var/lib/apt/lists/*
 RUN printf '%s\n' \
  'set(CMAKE_SYSTEM_NAME Linux)' \
  'set(CMAKE_SYSTEM_PROCESSOR aarch64)' \

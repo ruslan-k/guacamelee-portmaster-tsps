@@ -15,10 +15,9 @@ aarch64-linux-gnu-gcc --sysroot="$SYSROOT64" -O2 -Wall -Wextra \
 for src in i386_probe i386_glx_null_probe; do
   i686-linux-gnu-gcc -m32 -O2 -Wall -Wextra \
     -I/usr/include -I/usr/include/aarch64-linux-gnu -I/usr/include/SDL2 \
-    -Wl,--unresolved-symbols=ignore-all \
     -o "$OUT/$src" "src/$src.c" -L"$SYSROOT32/usr/lib" \
     -Wl,-rpath,/mnt/SDCARD/Data/ports/guacamelee/gamedata/lib32 \
-    -l:libSDL2-2.0.so.0 -ldl -lpthread -lm
+    -l:libSDL2-2.0.so.0 -L/usr/lib/i386-linux-gnu -lGL -ldl -lpthread -lm
 done
 file "$OUT"/*
 sha256sum "$OUT"/*

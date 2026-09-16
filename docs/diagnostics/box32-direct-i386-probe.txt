@@ -1,9 +1,28 @@
-# Stage 2 i386 Box32 + AArch64 gl4es probe
+# Box32 i386/gl4es probe evidence
 
-Status: NOT RUN — probe binary could not be built.
+Date: 2026-09-16
+Box64: `ac602ca9aac22aaad86951b6fb0a68a62f08b4ee9ffd7ff2823a946267fc2d00`
+Probe: i386 ELF SHA-256 `6090f87e0b0024c36ce351448493c90b411af68e39d29e9d0d195988f791a0fe`
 
-Source: `experiments/box32-direct/src/i386_probe.c`.
+Environment used the strict native KMS backend, absolute AArch64 gl4es `BOX64_LIBGL`, native EGL/GLES, `BOX64_WRAP_EGL=1`, `LIBGL_NOTEST=1`, shader logging, and no X11 stub, sched shim, `LIBGL_FB`, or `LIBGL_SHRINK`.
 
-The attempted Ubuntu 20.04 cross-toolchain container stalled during `apt-get install` before compilation; `/tmp/probe-build` contained no output. The existing Guacamelee run is not a substitute because it includes game code and reached a GLX boundary before first draw/swap.
+Runtime markers:
 
-No PASS/FAIL is claimed. Required acceptance remains: context, first clear, first swap through 120 swaps, and a physically visible magenta frame using the same Box64/Box32 and AArch64 gl4es paths.
+```text
+Box32 recognized i386 ELF
+Using native(wrapped) libSDL2-2.0.so.0
+LIBGL: Initialising gl4es
+LIBGL: Using GLES 2.0 backend
+LIBGL: loaded /usr/lib/libGLESv2.so.2
+LIBGL: loaded /usr/lib/libEGL.so.1
+I386 driver=KMSDRM displays=1
+I386 CreateWindow=... 1280x720
+I386 CreateContext=...
+I386 GL=GL4ES wrapping an unknown hardware/GL4ES using an unknown renderer/2.1 gl4es wrapper 1.1.7
+I386 swap=30,60,90,120
+I386 hold-after-120
+```
+
+Live `kmsgrab` returned `FB ID: 163, 1280x720`; vision inspection found uniform full-screen magenta.
+
+Classification: **PASS** for Box32 + wrapped SDL2 + AArch64 gl4es + native EGL/GLES + KMS presentation.

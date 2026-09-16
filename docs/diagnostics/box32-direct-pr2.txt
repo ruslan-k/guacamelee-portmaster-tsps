@@ -68,9 +68,22 @@ The original shared game binary was unpatched at offset `0x858da3` and contained
 10. The tracing X11 stub recorded no actual exported X11 calls. The next call was `glXGetCurrentDisplay`; Box64 attempted to map `libX11.so.6`, then the guest crashed at `glXGetCurrentDisplay` with `SIGSEGV` while dereferencing NULL. This proves the direct KMS/NOX11 path still leaks through a GLX current-display query; extending the X11 stub blindly is not accepted.
 11. The latest run ended with `exit_code=139`. No first draw or `SDL_GL_SwapWindow` was reached. The physical screenshot was captured while the process was alive and remained black.
 
-### Explicit acceptance status
+### Historical acceptance status
 
-Not working yet. No claim is made for visible output, title scene, input, audio, or gameplay. The direct architecture is classified at the GLX current-display boundary. The next controlled step is an independent native SDL/KMS probe and an i386 Box32/gl4es probe; only after those pass should Guacamelee-specific GLX usage be changed.
+At that earlier checkpoint the direct architecture was not working and remained unclassified at the GLX boundary. This status is superseded by the classified matrix below. No title-scene/input/audio success is claimed.
+
+The temporary post-fix Guacamelee run is documented separately in `box32-direct-guacamelee-after-null-display.txt`: NULL conversion is fixed, but shader source lookup fails before first draw.
+
+## Latest classified matrix (2026-09-16)
+
+```text
+native AArch64 strict KMS: PASS — DRM master released, EGL/Mali valid, swaps=120, live magenta
+Box32 i386 + gl4es:       PASS — context, gl4es/native EGL/GLES, swaps=120, live magenta
+i386 GLX NULL after fix:  PASS — NULL returned safely, no X11, swaps=120, live magenta
+Guacamelee after fix:     FAIL at shader bootstrap — loose .\\Shaders\\vs_2d_main.vsh missing; no draw/swap
+```
+
+The direct package now contains the tested Box64 NULL-display binary as primary, retains the pre-nullfix binary side-by-side, and does not expose the X11 stub by default. Production Box86/GLES bridge remains unchanged.
 
 ## Cleanup evidence
 

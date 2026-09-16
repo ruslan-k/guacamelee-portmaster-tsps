@@ -1,25 +1,24 @@
-# Stage 3/4/6 status — NULL Display patch and Guacamelee retest
+# i386 GLX NULL probe after Box64 fix
 
-`src/box64-box32-null-display.patch` was created as a separate generic Box64 patch. It changes only `addDisplay(void *d)` to return NULL before any X11 loading or Display dereference. The patch passes reverse-apply validation against the locally modified pinned checkout.
+Date: 2026-09-16
+Box64: AArch64 ELF SHA-256 `ac602ca9aac22aaad86951b6fb0a68a62f08b4ee9ffd7ff2823a946267fc2d00`
+Probe: i386 ELF SHA-256 `13a7a26c256ec2a5dabf7f1a2bdc95013cad9d310d96d5943f801fe410885294`
 
-A fresh Box64 binary was successfully built through the Dockerfile.64-derived multiarch image (Ubuntu 20.04, arm64 repositories, glibc 2.31 toolchain, pinned CMake 3.22.6):
+The probe was linked with a real i386 `libGL.so.1` dependency so `glXGetCurrentDisplay` was present in `.dynsym`; the earlier unresolved-symbol build was discarded.
+
+Runtime:
 
 ```text
-ELF 64-bit LSB executable, ARM aarch64
-maximum GLIBC requirement: 2.29
-SHA-256: ac602ca9aac22aaad86951b6fb0a68a62f08b4ee9ffd7ff2823a946267fc2d00
+SDL_GL_CreateContext non-null
+Calling glXGetCurrentDisplay => return 0x0
+GLXNULL glXGetCurrentDisplay=(nil)
+no libX11.so.6 in native LD_LIBRARY_PATH
+no BOX32-X11-STUB calls
+no SIGSEGV
+GLXNULL swap=30,60,90,120
+GLXNULL hold-after-120
 ```
 
-Status: BUILT / NOT DEPLOYED / NOT VALIDATED.
+Live KMS capture: `FB ID: 163, 1280x720`, uniform full-screen magenta.
 
-The earlier non-multiarch build attempt stalled, but the Dockerfile.64-derived rebuild above completed. Because Stage 1 native KMSDRM failed, the new Box64 binary was deliberately not deployed; it has no device validation yet. The existing direct package remains on the pre-fix diagnostic baseline and retains the tracing X11 stub.
-
-Required post-build acceptance:
-
-- i386 GLX NULL probe returns `(nil)` without loading X11 or calling the stub;
-- no SIGSEGV;
-- execution reaches glClear and 120 swaps;
-- physical magenta is visible;
-- only then remove the X11 stub from the Guacamelee baseline and retest the game.
-
-Guacamelee-after-fix: NOT RUN. No first draw/swap/visible-frame claim is made.
+Classification: **PASS**. Generic `addDisplay(NULL)` fix is independently validated on the device; no fake X11 library is needed for this path.
