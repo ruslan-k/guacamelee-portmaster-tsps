@@ -21,6 +21,8 @@ for src in i386_probe i386_glx_null_probe; do
     -Wl,-rpath,/mnt/SDCARD/Data/ports/guacamelee/gamedata/lib32 \
     -l:libSDL2-2.0.so.0 -L/usr/lib/i386-linux-gnu -lGL -ldl -lpthread -lm
 done
+i686-linux-gnu-gcc -m32 -O2 -Wall -Wextra \
+  -o "$OUT/i386_dynamic_probe" src/i386_dynamic_probe.c -ldl
 
 file "$OUT"/*
 sha256sum "$OUT"/*

@@ -1,0 +1,169 @@
+# Box32 direct hardext matrix
+
+## Scope
+
+Diagnostic-only runs on TSPS/Longan. Production launcher/package was not changed or replaced. Original `game-bin`, original gamedata cwd, validated Box64 low-pointer build, affinity shim and scheduler shim were used.
+
+Common environment:
+
+```text
+cwd=/mnt/SDCARD/Data/ports/guacamelee/gamedata
+SDL_VIDEODRIVER=KMSDRM
+SDL_VIDEO_GL_DRIVER=<diagnostic libGL>
+SDL_VIDEO_EGL_DRIVER=/usr/lib/libEGL.so.1
+LIBGL_GLES=/usr/lib/libGLESv2.so.2
+LIBGL_EGL=/usr/lib/libEGL.so.1
+LIBGL_ES=2
+LIBGL_GL=21
+BOX64_WRAP_EGL=1
+BOX64_DLSYM_ERROR=1
+BOX64_PREFER_WRAPPED=1
+BOX64_MMAP32=1
+BOX64_LD_LIBRARY_PATH=box86/x86:gamedata/lib32:libs/x86
+no LIBGL_FB
+no LIBGL_FBOFORCETEX
+no LIBGL_SHRINK
+no X11 stub
+```
+
+Box64 diagnostic SHA-256:
+
+```text
+33ef530199d26cbb3491fbacf106980932ca160662e297a63bcbfc10351bc850
+```
+
+## Variant A
+
+```text
+LIBGL_NOTEST=1
+maxcolorattach default=1
+explicit depthstencil default=OFF
+```
+
+Diagnostic libGL SHA-256:
+
+```text
+472dd24f84a931f5faddcba66ea27d1714734e86b171160e07c7f1ad791885b0
+```
+
+Raw log SHA-256:
+
+```text
+30a0a3a4cecb67eb60c54fc36683cf56b32fe5e7f0c40e9bc9260e0899a590db
+```
+
+Capture SHA-256:
+
+```text
+fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+Observed:
+
+```text
+GUA-DRAW=256
+GUA-SWAP=356
+GUA-PRESENT=356
+SIGSEGV=0
+GL error 0x506=4743
+INCOMPLETE_MISSING_ATTACHMENT=0
+first FBO3/native3 pixel=0,0,0,0
+pre-blit FBO1/native2 pixel=0,0,0,0
+post-blit FBO2 pixel=0,0,0,0
+```
+
+## Variant B
+
+```text
+LIBGL_NOTEST=1
+maxcolorattach default=1
+explicit depthstencil default=ON
+```
+
+Diagnostic libGL SHA-256 with pipeline/pixel trace:
+
+```text
+e223ca84b4b860028ecbeeddce6035a08fa5d32a475779496cea2663001ec788
+```
+
+Full long-run raw log SHA-256:
+
+```text
+ce00e27c5ead063342f951368d1a1dcf953d66c1b5ec77ea15fa6b16959ad640
+```
+
+Observed:
+
+```text
+GUA-HARDEXT where=notest es=2 fbo=1 drawbuffers=0 maxdrawbuffers=1 maxcolorattach=1 depthstencil=1 depth24=0 rgba8=0 npot=1 maxtex=8 maxsize=2048
+GUA-DRAW=256
+GUA-SWAP=512
+GUA-PRESENT=512
+SIGSEGV=0
+GL error 0x506=0
+```
+
+The first real draw still produced:
+
+```text
+logical/native FBO=3/3
+rgba=0,0,0,0
+viewport=0,0,1280,720
+scissor=disabled, 0,0,1280,720
+color mask=1111
+blend=0 depth=0 cull=0
+program=21
+```
+
+## Variant C
+
+```text
+LIBGL_NOTEST unset
+maxcolorattach patch OFF
+explicit depthstencil patch OFF
+```
+
+Tiny i386 dynamic probe SHA-256:
+
+```text
+a56ae3902b68838bc5a1eec6a8da305775a9f7976d8fde474b6521cb878ccb15
+```
+
+Probe raw log SHA-256:
+
+```text
+b78cc5a1e8bc9c1b053ffd326572a4574f99c167bf92b4cfdadb1165eb983872
+```
+
+Probe capture SHA-256:
+
+```text
+fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+Probe evidence:
+
+```text
+SDL_CreateWindow: PASS
+SDL_GL_CreateContext: PASS
+EGL display/context/draw: valid
+EGL read surface: NULL
+SDL swaps: 30 PASS
+capture: 1280x720, 921600/921600 pixels black
+```
+
+Normal gl4es detection did not complete safely:
+
+```text
+egl_eglGetPlatformDisplay is NULL
+eglInitialize: EGL_BAD_DISPLAY
+default to none
+```
+
+Therefore C is not a preferred path and was not run with the game.
+
+## Matrix classification
+
+`maxcolorattach=1` is a real required NOTEST initialization. `depthstencil=1` independently removes the FBO/0x506 failure. Neither makes the game visible. Normal detection is not usable on this direct SDL/KMS path without a separate EGL loader fix.
+
+All temporary device processes/files were removed after each run. `principal.sh` and MainUI remained running. Production state was left untouched.

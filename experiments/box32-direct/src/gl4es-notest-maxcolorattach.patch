@@ -1,0 +1,9 @@
+diff --git a/src/glx/hardext.c b/src/glx/hardext.c
+--- a/src/glx/hardext.c
++++ b/src/glx/hardext.c
+@@ -97,6 +97,7 @@ void GetHardwareExtensions(int notest)
+     hardext.maxplanes = 6;
+     hardext.maxdrawbuffers = 1;
++    hardext.maxcolorattach = 1;
+ 
+     hardext.esversion = globals4es.es;
