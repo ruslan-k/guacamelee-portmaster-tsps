@@ -1,0 +1,37 @@
+diff --git a/src/wrapped32/wrappedsdl2.c b/src/wrapped32/wrappedsdl2.c
+index 842934f..f0a5eb3 100644
+--- a/src/wrapped32/wrappedsdl2.c
++++ b/src/wrapped32/wrappedsdl2.c
+@@ -801,6 +801,19 @@ EXPORT int my32_2_SDL_GetCPUCount(x64emu_t* emu)
+ 
+ 
+ 
++#include <time.h>
++
++EXPORT void my32_2_SDL_GL_SwapWindow(x64emu_t* emu, void* window)
++{
++    static unsigned swap_count;
++    struct timespec ts;
++    clock_gettime(CLOCK_MONOTONIC, &ts);
++    unsigned long long ms = (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL;
++    if (swap_count < 512)
++        fprintf(stderr, "GUA-SWAP t=%llu n=%u\\n", ms, ++swap_count);
++    my->SDL_GL_SwapWindow(window);
++}
++
+ #define ALTMY my32_2_
+ 
+ #define CUSTOM_INIT                       \
+diff --git a/src/wrapped32/wrappedsdl2_private.h b/src/wrapped32/wrappedsdl2_private.h
+index 5156da2..446889a 100644
+--- a/src/wrapped32/wrappedsdl2_private.h
++++ b/src/wrapped32/wrappedsdl2_private.h
+@@ -313,7 +313,7 @@ GO(SDL_GL_MakeCurrent, iFpp)
+ GO(SDL_GL_ResetAttributes, vFv)
+ GO(SDL_GL_SetAttribute, iFui)
+ GO(SDL_GL_SetSwapInterval, iFi)
+-GO(SDL_GL_SwapWindow, vFp)
++GOM(SDL_GL_SwapWindow, vFEp)
+ GO(SDL_GL_UnbindTexture, iFp)
+ GO(SDL_GL_UnloadLibrary, vFv)
+ //GO(SDL_GUIDToString, vFUUpi)

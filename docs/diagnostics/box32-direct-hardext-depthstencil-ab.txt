@@ -1,0 +1,101 @@
+# Packed depth/stencil capability A/B
+
+Date: 2026-09-16
+Device: TSPS / Longan
+
+## Baseline
+
+The original-layout run used the validated AArch64 Box64 swap-wrapper trace and gl4es trace with:
+
+```text
+LIBGL_NOTEST=1
+LIBGL_FBOFORCETEX=0
+```
+
+The first FBO transition was:
+
+```text
+RB_STORAGE requested=0x81a5 -> native=0x88f0 1280x720
+same native renderbuffer 2 attached to:
+  GL_DEPTH_ATTACHMENT 0x8d00
+  GL_STENCIL_ATTACHMENT 0x8d20
+FBO status: 0x8cdd
+```
+
+`0x8cdd` is the unsupported/incomplete path observed by the title. The same run produced repeated `glError (0x506)` from `VideoSys.cpp:1644`, with real draw and swap activity.
+
+## A/B
+
+Only gl4es `GetHardwareExtensions(notest)` was changed:
+
+```c
+hardext.depthstencil = 1;
+```
+
+All other variables were held constant: original binary, original `gamedata` cwd/layout, Box64 generated swap wrapper, affinity/scheduler shims, SDL/KMSDRM, native EGL/GLES, `LIBGL_FBOFORCETEX=0`.
+
+Diagnostic library:
+
+```text
+AArch64 ELF
+marker: GUA-HARDEXT notest=1 es=2 depthstencil=1
+SHA-256:
+2b0347728b1ef3828b0e4c731141bb7580afa5ccb041e5ce0da4399756ac31d0
+```
+
+Raw log:
+
+```text
+ab-hardext-depthstencil.log
+SHA-256:
+4756a0087733f2d1c2f4b2aff438116da9412f17815db7b3d41dec5467ef0c73
+```
+
+Visual capture:
+
+```text
+hardext-depthstencil-8.png
+SHA-256:
+fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+## Results
+
+Positive change:
+
+```text
+FBO1 packed depth/stencil: 0x8cdd -> 0x8cd5
+```
+
+The native post-attachment trace showed the same native renderbuffer 2 attached to both depth and stencil, now accepted for FBO1:
+
+```text
+native type=0x8d41 name=2
+DEPTH attachment 0x8d00
+STENCIL attachment 0x8d20
+status=0x8cd5
+```
+
+Later title/resolve checks still reported:
+
+```text
+GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT
+```
+
+Runtime census:
+
+```text
+real GUA-DRAW events: 256 bounded events
+GUA-SWAP events: 110
+shader compile status: 1
+program link/use: linked=1
+0x506 count: 334
+SIGSEGV: absent
+FMOD init succeeded with driver 1
+```
+
+The framebuffer capture at ~8 seconds was valid but uniformly black. It contains no menu or other visible game content. Therefore this A/B is **not a visual fix** and is not promoted to the package.
+
+## Classification
+
+`hardext.depthstencil=1` is a real partial FBO-status improvement, but it does not close the title render path. The remaining missing-attachment transition is later than the initial packed depth/stencil setup and must be traced with attachment IDs/order around the first title/resolve draw. Do not combine this A/B with `LIBGL_FBOFORCETEX`, shader rewrites, viewport changes, or presentation workarounds.
