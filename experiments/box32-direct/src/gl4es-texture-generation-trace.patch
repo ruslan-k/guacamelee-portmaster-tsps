@@ -92,7 +92,7 @@ index 498ecc5..d111632 100644
      // special check for QUADS and TRIANGLES that need multiple of 4 or 3 vertex...
      count = adjust_vertices(mode, count);
 diff --git a/src/gl/framebuffers.c b/src/gl/framebuffers.c
-index 93194fc..ed557bf 100644
+index 93194fc..2b7ae59 100644
 --- a/src/gl/framebuffers.c
 +++ b/src/gl/framebuffers.c
 @@ -7,7 +7,68 @@
@@ -430,16 +430,22 @@ index 93194fc..ed557bf 100644
  void deleteMainFBO(void *state) {
      LOAD_GLES2_OR_OES(glDeleteFramebuffers);
      LOAD_GLES2_OR_OES(glDeleteRenderbuffers);
-@@ -1391,6 +1525,8 @@ void APIENTRY_GL4ES gl4es_glFramebufferTextureLayer(    GLenum target, GLenum at
+@@ -1391,6 +1525,14 @@ void APIENTRY_GL4ES gl4es_glFramebufferTextureLayer(    GLenum target, GLenum at
  void gl4es_SwapBuffers_currentContext();    // defined in glx/glx.c
  #endif
  void APIENTRY_GL4ES gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) {
++    if (getenv("GUA_ENABLE_PIXEL_TRACE") && glstate && glstate->fbo.current_fb && glstate->fbo.fbo_read) {
++        GLenum gua_rd_target = ReadDraw_Push(GL_READ_FRAMEBUFFER);
++        gua_pixel_trace("GUA-SOURCE-BEFORE-BLIT");
++        ReadDraw_Pop(GL_READ_FRAMEBUFFER);
++        (void)gua_rd_target;
++    }
 +    gua_last_blit_draw_fbo = (glstate && glstate->fbo.fbo_draw) ? glstate->fbo.fbo_draw->id : 0;
 +    gua_last_blit_draw_texture = (glstate && glstate->fbo.fbo_draw) ? glstate->fbo.fbo_draw->color[0] : 0;    GUA_FBO_TRACE("BLIT src=%d,%d-%d,%d dst=%d,%d-%d,%d mask=0x%x filter=0x%x read=%u draw=%u", srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter, glstate->fbo.fbo_read->id, glstate->fbo.fbo_draw->id);
      // mask will be ignored
      // filter will be taken only for ReadFBO has no Texture attached (so readpixel is used)
      DBG(printf("glBlitFramebuffer(%d, %d, %d, %d,  %d, %d, %d, %d,  0x%04X, %s) fbo_read=%d, fbo_draw=%d\n",
-@@ -1456,6 +1592,7 @@ void APIENTRY_GL4ES gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX
+@@ -1456,6 +1598,7 @@ void APIENTRY_GL4ES gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX
              nheight = srcY1;
          }
      }
@@ -447,7 +453,7 @@ index 93194fc..ed557bf 100644
      float srcW = srcX1-srcX0;
      float srcH = srcY1-srcY0;
      float zoomx = ((float)(dstX1-dstX0))/srcW;
-@@ -1486,7 +1623,14 @@ void APIENTRY_GL4ES gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX
+@@ -1486,7 +1629,14 @@ void APIENTRY_GL4ES gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX
      GLint vp[4];
      memcpy(vp, &glstate->raster.viewport, sizeof(vp));
      gl4es_glViewport(0, 0, fbowidth, fboheight);

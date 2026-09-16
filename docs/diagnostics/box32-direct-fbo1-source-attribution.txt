@@ -1,0 +1,91 @@
+Guacamelee Box32 direct — FBO1 source attribution
+Date: 2026-09-17
+
+Result
+------
+The source-side readback now temporarily binds the native read framebuffer via
+ReadDraw_Push(GL_READ_FRAMEBUFFER), samples one pixel, and restores it with
+ReadDraw_Pop(GL_READ_FRAMEBUFFER). This avoids mistaking the current draw FBO2
+for the read-side FBO1.
+
+At the first BLIT:
+
+  logical current=2
+  logical draw=2
+  logical read=1
+  native binding during source sample=1
+  GUA-SOURCE-BEFORE-BLIT rgba=0,0,0,255
+
+After the BLIT writer:
+
+  GUA-TEX-WRITER seq=424 kind=BLIT
+    destination fbo=2
+    texture logical=2 gen=1 ptr=0x58908c70 glname=2
+  GUA-SOURCE-AFTER-WRITER rgba=0,0,0,255
+
+The result repeats across 12 captured BLIT cycles. The FBO1/native1 source is
+already black before the BLIT, and the FBO2/native2 destination remains black
+after it. The BLIT is not observed to convert a non-black source into black.
+
+Draw-target distribution in this run
+-------------------------------------
+
+  logical_fbo=0: 60 draws
+  logical_fbo=1: 0 draws
+  logical_fbo=2: 0 draws
+  logical_fbo=3: 12 draws
+
+Relevant programs in logical_fbo=0 included program86, program2, program22 and
+program18. Program21 drew to logical_fbo=3. No draw writer targeting logical
+FBO1 was observed by the current gl4es draw marker. This is an observation about
+the gl4es logical state; it does not by itself prove that the game did not render
+through another/native path.
+
+FBO setup evidence
+------------------
+- FBO1 color0 attachment: logical texture1, native glname1, complete 0x8cd5
+- FBO1 depth/stencil use renderbuffer native id2
+- FBO2 color0 attachment: logical texture2 gen1, native glname2, complete 0x8cd5
+- BLIT reports read=FBO1 and draw=FBO2
+- texture2 is the exact object later consumed by P86 sampler0
+
+Program86 exact chain
+---------------------
+
+  P86 sampler0:
+    logical=2 gen=1 ptr=0x58908c70 glname=2 alive=1
+    last_writer=BLIT seq=424 fbo=2
+    shadow_actual_tex2d[unit0]=2
+
+This is an object match, not a stale-generation finding.
+
+Interpretation
+--------------
+
+  FBO1 source before BLIT: BLACK
+  FBO2 destination after BLIT: BLACK
+  P86 sampler0 object match: YES
+  P86 source black reason: upstream FBO1/read-side content is already black
+  exact FBO1 producer: NOT_YET_PROVEN
+  compatibility fix: NONE
+
+The next diagnostic should trace why the game/gl4es logical draw stream is
+classified as FBO0 while the resolve path reads FBO1, or identify the upstream
+native/renderbuffer writer outside the current draw marker. Do not patch BLIT,
+FBO mapping, shader inputs, or presenter based on this report alone.
+
+Raw evidence
+------------
+  /mnt/external/Hermes/guac-readsrc-runtime.log
+  size=570661 bytes
+  SHA-256=8f67a2587aa8adffba29bbccfe5083c2700d592be21565acb41d47213859aa7a
+
+Restoration
+-----------
+Latest diagnostic runtime restored after the run:
+
+  libGL 37fe3fe0d86ace2bb1b746846396c48f788b6d8d3bfb5f53887accc6c78cf1a8
+  Box64 6f55a18f5e3f5eaadd293b046e1428f4aca7bd50ce6462ceffc11a4fca4849d5
+
+No production process, launcher, game binary, input, audio, or ARMHF bridge was
+modified.
