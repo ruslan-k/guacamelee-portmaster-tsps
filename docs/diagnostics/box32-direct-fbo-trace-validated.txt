@@ -1,0 +1,86 @@
+# Validated gl4es FBO lifecycle trace
+
+Date: 2026-09-16
+Device: TSPS / Longan
+Run: original `gamedata/game-bin`, Box64 + Box32, runtime affinity shim + sched shim
+Trace library: AArch64 gl4es built from pinned source checkout
+Trace library SHA-256: `a797110d8ee8b94f281a50c10add054c144785061e57e65b29dc0b04e27bd00e`
+Raw log: `fbo-live.log`
+Raw log SHA-256: `63977072055183d75a5c56bb15f5cfd4d94ceea4c9bad555abe9ad9fbffe9c2b`
+Framebuffer capture: `fbo-live.png`, 1280x720 PNG
+Capture SHA-256: `$(sha256sum /mnt/external/Hermes/fbo-live.png | cut -d" " -f1)`
+
+## Execution
+
+The game process remained alive during the capture window. The temporary trace library was not installed over the production `libGL.so.1`; it was selected with `BOX64_LIBGL` and `SDL_VIDEO_GL_DRIVER` only.
+
+The trace emitted exactly 512 bounded events. This is a valid trace of the startup and early render loop, but later events are truncated by the deliberate cap.
+
+## First FBO lifecycle
+
+```text
+n=1  GEN n=1 first=1
+n=2  BIND target=0x8ca9 id=1 before=0
+n=3  GEN_RB n=1 first=1
+n=4  RB_STORAGE target=0x8d41 fmt=0x8058 w=1280 h=720
+n=5  ATTACH_RB target=0x8ca9 attachment=0x8ce0 rbtarget=0x8d41 id=1
+n=6  CHECK target=0x8ca9 fbo=1 internal=0 status=0x8cd7
+n=7  BIND target=0x8ca9 id=1 before=1
+n=8  GEN_RB n=1 first=2
+n=9  RB_STORAGE target=0x8d41 fmt=0x88f0 w=1280 h=720
+n=10 ATTACH_RB target=0x8ca9 attachment=0x821a rbtarget=0x8d41 id=2
+n=11 ATTACH_RB target=0x8ca9 attachment=0x8d00 rbtarget=0x8d41 id=2
+n=12 ATTACH_RB target=0x8ca9 attachment=0x8d20 rbtarget=0x8d41 id=2
+n=13 CHECK target=0x8ca9 fbo=1 internal=0 status=0x8cdd
+```
+
+Interpretation of the first FBO setup:
+
+- color renderbuffer: `GL_RGBA8` (`0x8058`), 1280x720;
+- depth/stencil renderbuffer: `0x88f0` (`GL_DEPTH24_STENCIL8`), 1280x720;
+- the same renderbuffer is attached to `GL_DEPTH_STENCIL_ATTACHMENT`, `GL_DEPTH_ATTACHMENT`, and `GL_STENCIL_ATTACHMENT`;
+- status after color-only attachment: `0x8cd7` (`GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT`);
+- status after depth/stencil attachments: `0x8cdd` (`GL_FRAMEBUFFER_UNSUPPORTED`).
+
+## First offscreen texture FBO
+
+```text
+n=14 GEN n=1 first=2
+n=15 BIND target=0x8ca9 id=2 before=1
+n=16 ATTACH_TEX fbo=2 attachment=0x8ce0 target=0xde1 tex=1 level=0
+n=17 CHECK target=0x8ca9 fbo=2 internal=0 status=0x8cd7
+```
+
+Subsequent texture FBOs 3, 4, and 5 attach texture IDs 89, 90, and 91 respectively to `GL_COLOR_ATTACHMENT0` and also report `0x8cd7`.
+
+## Other runtime evidence
+
+```text
+FMOD audio drivers (39):
+FMOD init succeeded with driver 1
+```
+
+The log contains repeated Box64/gl4es activity and the process stays alive. The capture made during this run was uniformly black; therefore a physical visible game frame is not proven by this run despite the user's contemporaneous report that an image appeared. No `glDrawArrays`/`glDrawElements` names were emitted by the current Box64 log level; first draw remains unproven.
+
+## Physical observation
+
+The user reports that the image reaches the game menu and then becomes black. This is stronger evidence than the earlier single black capture: startup/menu rendering can reach the panel, while a later menu transition/render pass fails. The capture in this report was taken at a different timing and was uniformly black, so it is retained as a separate physical capture rather than substituted for the user's timing report.
+
+## Current blocker
+
+The validated FBO+texture trace proves the first game FBO sequence and the texture allocation inputs. The first offscreen FBO attaches texture 1 at level 0 after the game has issued level-0 texture uploads; later FBOs attach texture IDs 89, 90, and 91. The trace still reports `0x8cd7` for those FBO checks, while the first depth/stencil setup reports `0x8cdd` after the `0x88f0` depth-stencil renderbuffer is attached to three attachment points.
+
+This narrows the failure to a later render pass/menu transition rather than generic SDL/KMS startup. The user reports that the image reaches the menu and then turns black. A separate early/late capture run in this session produced two identical full-black PNGs, so it does not independently prove the menu frame; the user's timing report is retained as physical evidence and is not replaced by that capture.
+
+The next bounded fix candidate is to correlate the exact texture record (level-0 dimensions/format/type) with FBO attachment and then test one render-path change at a time. Do not change production behavior or declare visible gameplay until an actual menu and gameplay frame are captured.
+
+## Validated texture-trace run
+
+Trace library with FBO+texture hooks: `libGL-fbo-tex-trace.so.1`
+SHA-256: `28454f2216b359c3e6d950f9b24ee81dc05657f1ed90c817ccb7a4ff96af244b`
+Raw log: `fbo-tex-live.log`
+Raw log SHA-256: `f985b0c07b633ada8b740f74431a807d04db6ef64a73c0b4d49db465eb59af05`
+Early capture: `fbo-tex-early.png`, SHA-256 `fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2`
+Late capture: `fbo-tex-late.png`, same SHA-256 (both full black 1280x720 captures)
+
+The trace emitted 1024 bounded `GUA-TEX` events. The first texture was a 1280x720 RGBA8 level-0 allocation with `data=NULL`; subsequent level-0 allocations include valid non-zero dimensions and data pointers. FMOD reported `FMOD init succeeded with driver 1`.
