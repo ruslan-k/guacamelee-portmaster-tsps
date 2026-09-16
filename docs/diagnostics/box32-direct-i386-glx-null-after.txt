@@ -1,0 +1,17 @@
+# Stage 3/4/6 status — NULL Display patch and Guacamelee retest
+
+`src/box64-box32-null-display.patch` was created as a separate generic Box64 patch. It changes only `addDisplay(void *d)` to return NULL before any X11 loading or Display dereference. The patch passes reverse-apply validation against the locally modified pinned checkout.
+
+Status: NOT BUILT / NOT DEPLOYED / NOT VALIDATED.
+
+The attempted Box64 rebuild with the patch stalled in an Ubuntu 20.04 container while installing the cross-toolchain. No new Box64 binary or SHA-256 exists, so no device deployment was performed. The existing direct package remains on the pre-fix diagnostic baseline and retains the tracing X11 stub; it was not treated as a post-fix result.
+
+Required post-build acceptance:
+
+- i386 GLX NULL probe returns `(nil)` without loading X11 or calling the stub;
+- no SIGSEGV;
+- execution reaches glClear and 120 swaps;
+- physical magenta is visible;
+- only then remove the X11 stub from the Guacamelee baseline and retest the game.
+
+Guacamelee-after-fix: NOT RUN. No first draw/swap/visible-frame claim is made.

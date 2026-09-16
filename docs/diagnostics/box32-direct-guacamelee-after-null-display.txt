@@ -1,0 +1,7 @@
+# Guacamelee after NULL-Display fix
+
+Status: NOT RUN.
+
+The generic `addDisplay(NULL)` Box64 patch has not yet produced a deployable binary because the Ubuntu 20.04 cross-toolchain container stalled during package installation. Therefore the direct launcher was not changed to remove the X11 stub and Guacamelee was not retested after the fix.
+
+Last pre-fix evidence is in `box32-direct-pr2.txt`: SDL window/context and GL string/proc enumeration succeeded, then `glXGetCurrentDisplay` returned NULL through the gl4es NOX11/GLX-stub path and Box64 crashed with exit code 139 before first draw or swap.

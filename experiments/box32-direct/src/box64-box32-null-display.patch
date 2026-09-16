@@ -1,0 +1,15 @@
+diff --git a/src/libtools/my_x11_conv.c b/src/libtools/my_x11_conv.c
+index be660d8..a7c0668 100644
+--- a/src/libtools/my_x11_conv.c
++++ b/src/libtools/my_x11_conv.c
+@@ -213,6 +213,10 @@ void* getScreen64(void* dpy, void* a)
+ void* my_dlopen(x64emu_t* emu, void *filename, int flag);
+ void* addDisplay(void* d)
+ {
++    // A native Display*-returning function may validly return NULL.
++    // Preserve NULL instead of loading X11 or dereferencing a fake Display.
++    if(!d)
++        return d;
+     if(!my_context->libx11) {
+         // the lib has not be loaded directly... need to open it! leaking the lib handle...
+         #ifdef ANDROID

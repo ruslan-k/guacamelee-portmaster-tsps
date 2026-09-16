@@ -7,6 +7,8 @@ BUILD=${BUILD:-box64-build}
 mkdir -p "$BUILD"
 git -C "$BOX64_SRC" apply --check "$PWD/src/box64-box32-lowptr.patch"
 git -C "$BOX64_SRC" apply "$PWD/src/box64-box32-lowptr.patch"
+git -C "$BOX64_SRC" apply --check "$PWD/src/box64-box32-null-display.patch"
+git -C "$BOX64_SRC" apply "$PWD/src/box64-box32-null-display.patch"
 cmake -S "$BOX64_SRC" -B "$BUILD" \
   -DCMAKE_SYSTEM_NAME=Linux \
   -DCMAKE_SYSTEM_PROCESSOR=aarch64 \

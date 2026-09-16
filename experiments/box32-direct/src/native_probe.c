@@ -16,8 +16,16 @@ int main(void) {
     printf("NATIVE CreateContext=%p err=%s\n", c, SDL_GetError());
     if (!c) return 3;
     int ww=0,hh=0,dw=0,dh=0; SDL_GetWindowSize(w,&ww,&hh); SDL_GL_GetDrawableSize(w,&dw,&dh);
-    printf("NATIVE window=%dx%d drawable=%dx%d egl=%s/%s gl=%s/%s/%s\n", ww,hh,dw,dh,
-      eglQueryString(EGL_NO_DISPLAY,EGL_VENDOR), eglQueryString(EGL_NO_DISPLAY,EGL_VERSION),
+    EGLDisplay edpy = eglGetCurrentDisplay();
+    EGLContext ectx = eglGetCurrentContext();
+    EGLSurface edraw = eglGetCurrentSurface(EGL_DRAW);
+    EGLSurface eread = eglGetCurrentSurface(EGL_READ);
+    const char *ev = edpy != EGL_NO_DISPLAY ? eglQueryString(edpy, EGL_VENDOR) : "(none)";
+    const char *ever = edpy != EGL_NO_DISPLAY ? eglQueryString(edpy, EGL_VERSION) : "(none)";
+    printf("NATIVE window=%dx%d drawable=%dx%d\n", ww,hh,dw,dh);
+    printf("NATIVE egl display=%p context=%p draw=%p read=%p error=0x%x vendor=%s version=%s\n",
+      edpy, ectx, edraw, eread, eglGetError(), ev, ever);
+    printf("NATIVE GL vendor=%s renderer=%s version=%s\n",
       (const char*)glGetString(GL_VENDOR),(const char*)glGetString(GL_RENDERER),(const char*)glGetString(GL_VERSION));
     for (int i=1;i<=120;i++) { glClearColor(1,0,1,1); glClear(GL_COLOR_BUFFER_BIT); SDL_GL_SwapWindow(w); if (!(i%30)) printf("NATIVE swap=%d err=%s\n",i,SDL_GetError()); SDL_Delay(16); }
     SDL_GL_DeleteContext(c); SDL_DestroyWindow(w); SDL_Quit(); return 0;

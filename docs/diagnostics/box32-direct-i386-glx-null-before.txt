@@ -1,0 +1,15 @@
+# Stage 2B i386 GLX NULL probe — before fix
+
+Status: NOT RUN independently.
+
+Source: `experiments/box32-direct/src/i386_glx_null_probe.c`.
+
+The Guacamelee run provides a non-independent reproduction:
+
+```text
+SDL_GL_CreateContext -> glGetString -> glXGetProcAddress
+-> glXGetCurrentDisplay -> SIGSEGV in Box64 conversion path
+exit_code=139
+```
+
+The tracing X11 stub logged no actual X11 function calls. The observed crash is consistent with `addDisplay(fn())` receiving the intentional NULL returned by gl4es `NOX11=ON + GLX_STUBS=ON`, then dereferencing it. A standalone before-fix result is still required and must not be inferred from the game run.

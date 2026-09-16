@@ -1,0 +1,9 @@
+# Stage 2 i386 Box32 + AArch64 gl4es probe
+
+Status: NOT RUN — probe binary could not be built.
+
+Source: `experiments/box32-direct/src/i386_probe.c`.
+
+The attempted Ubuntu 20.04 cross-toolchain container stalled during `apt-get install` before compilation; `/tmp/probe-build` contained no output. The existing Guacamelee run is not a substitute because it includes game code and reached a GLX boundary before first draw/swap.
+
+No PASS/FAIL is claimed. Required acceptance remains: context, first clear, first swap through 120 swaps, and a physically visible magenta frame using the same Box64/Box32 and AArch64 gl4es paths.

@@ -1,0 +1,9 @@
+# Stage 1 native AArch64 SDL/KMSDRM probe
+
+Status: NOT RUN — build blocked before producing a binary.
+
+The source is `experiments/box32-direct/src/native_probe.c`. It was updated to query `eglGetCurrentDisplay`, `eglGetCurrentContext`, `eglGetCurrentSurface(EGL_DRAW/READ)` after SDL context creation.
+
+Attempted build environment: Ubuntu 20.04 container with `gcc-aarch64-linux-gnu`, SDL2/GLES/EGL headers and target TSPS libraries copied into a sysroot. The container stalled in `apt-get install` for 420 seconds; `/tmp/probe-build` remained empty. No PASS/FAIL is claimed for native KMSDRM visibility.
+
+Required next run: build with a cached/pinned compatible toolchain, then execute on TSPS with only native SDL2/EGL/GLES, `SDL_VIDEODRIVER=KMSDRM`, and capture physical magenta while 120 swaps are active.
