@@ -1,0 +1,120 @@
+name: Build ARM64 Box64 with Box32
+
+on:
+  push:
+    branches:
+      - chatgpt-box64-box32-build
+    paths:
+      - .github/workflows/build-box64-box32-chatgpt.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:20.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      BOX64_COMMIT: f9d58352e937c8448a921f978b81da8cd86419c7
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git build-essential python3 python3-pip file binutils \
+            binutils-i686-linux-gnu ca-certificates xz-utils
+          python3 -m pip install --no-cache-dir 'cmake==3.31.6'
+          cmake --version
+          gcc --version | head -1
+          ldd --version | head -1
+          uname -a
+
+      - name: Clone pinned Box64 source
+        run: |
+          git clone https://github.com/ptitSeb/box64.git box64-src
+          cd box64-src
+          git checkout "$BOX64_COMMIT"
+          test "$(git rev-parse HEAD)" = "$BOX64_COMMIT"
+
+      - name: Build generic ARM64 Box64 with Box32
+        run: |
+          cd box64-src
+          cmake -S . -B build \
+            -DARM_DYNAREC=ON \
+            -DBOX32=ON \
+            -DBOX32_BINFMT=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHAVE_TRACE=OFF \
+            -DSTATICBUILD=OFF \
+            -DCI=ON
+          cmake --build build -j "$(nproc)"
+
+      - name: Verify ARM64 ELF and Box32 smoke test
+        run: |
+          set -eux
+          cd box64-src
+          file build/box64
+          readelf -h build/box64 | tee /tmp/readelf.txt
+          readelf -Ws build/box64 | grep -E 'box32|Box32' | head -20 || true
+          strings build/box64 | grep -i -m 20 box32 || true
+          ./build/box64 -v | tee /tmp/box64-version.txt || true
+
+          cat >/tmp/exit32.s <<'EOF'
+          .section .text
+          .global _start
+          _start:
+              movl $1, %eax
+              xorl %ebx, %ebx
+              int $0x80
+          EOF
+          i686-linux-gnu-as --32 /tmp/exit32.s -o /tmp/exit32.o
+          i686-linux-gnu-ld -m elf_i386 -static -o /tmp/exit32 /tmp/exit32.o
+          file /tmp/exit32 | tee /tmp/exit32-file.txt
+          set +e
+          BOX64_LOG=1 ./build/box64 /tmp/exit32 >/tmp/box32-smoke.log 2>&1
+          smoke_rc=$?
+          set -e
+          cat /tmp/box32-smoke.log
+          echo "BOX32_SMOKE_RC=$smoke_rc"
+          test "$smoke_rc" -eq 0
+
+      - name: Package binary
+        run: |
+          set -eux
+          mkdir -p out
+          cp box64-src/build/box64 out/box64-box32-aarch64
+          chmod 0755 out/box64-box32-aarch64
+          strip --strip-unneeded out/box64-box32-aarch64
+          file out/box64-box32-aarch64 | tee out/FILE.txt
+          readelf -h out/box64-box32-aarch64 > out/READELF.txt
+          sha256sum out/box64-box32-aarch64 | tee out/SHA256SUMS
+          cat > out/BUILD-INFO.txt <<EOF
+          Upstream: https://github.com/ptitSeb/box64
+          Commit: $BOX64_COMMIT
+          Target: generic Linux AArch64
+          Host userspace used for build: Ubuntu 20.04 / glibc 2.31
+          CMake: ARM_DYNAREC=ON BOX32=ON BOX32_BINFMT=OFF CMAKE_BUILD_TYPE=Release STATICBUILD=OFF
+          Intended test target: TrimUI Smart Pro S / SpruceOS
+          Note: dynamic build retained intentionally for native library wrappers (SDL/OpenGL/EGL).
+          EOF
+          cp /tmp/box64-version.txt out/BOX64-VERSION.txt || true
+          cp /tmp/box32-smoke.log out/BOX32-SMOKE.txt || true
+          tar -C out -czf box64-box32-aarch64-tsps.tar.gz .
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: box64-box32-aarch64-tsps
+          path: |
+            out/box64-box32-aarch64
+            out/BUILD-INFO.txt
+            out/FILE.txt
+            out/READELF.txt
+            out/SHA256SUMS
+            out/BOX64-VERSION.txt
+            out/BOX32-SMOKE.txt
+            box64-box32-aarch64-tsps.tar.gz
+          if-no-files-found: error
+          retention-days: 7
