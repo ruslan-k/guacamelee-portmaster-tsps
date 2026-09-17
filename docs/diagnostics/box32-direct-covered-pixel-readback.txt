@@ -1,0 +1,127 @@
+Guacamelee Box32 direct — covered-pixel readback and producer evidence
+Date: 2026-09-17
+
+Configuration
+-------------
+- pinned gl4es: 81547d986798e876de8b434193920b606a72363f
+- readback diagnostic libGL SHA-256: ae5266a56dd4aa050bf0ddfe3127c2045e54753415095d9cc00dbf261149eca8
+- clean swap-only Box64: b81cf2e19250d97028a2cdf8b3e45efba88a157f76defda1d2cc63a3498720be
+- corrected direct launcher, cwd=gamedata
+- BOX64_LOG=0
+- GUA_ENABLE_PIXEL_TRACE=1
+- no direct-present helper, no attachment remap, no shader/color/FBO semantic changes
+
+Raw evidence
+------------
+/mnt/external/Hermes/guac-readback2-runtime.log
+size: 1,224,651 bytes
+SHA-256: d3f29f0b2c42e1c9183395ab31d3092a8c81ed356494f6fc8052f0acec71772e
+
+Pixel/control result
+--------------------
+The first program18 indexed draw is followed by:
+
+  program=18, logical_fbo=0, native=0
+  PIXEL_AFTER_DRAW rgba=0,0,0,255
+
+Program18 has NDC bbox:
+  (-1.1554687,-1.2791667) — (1.1570313,1.27638888)
+
+Thus the center pixel is inside the XY bbox, although exact triangle coverage is
+not independently rasterized here. All six referenced vertices from the clean
+vertex trace had RGB=(0,0,0), alpha=226. The program18 fragment path is textured
+and multiplies by v_colour0, so the all-zero RGB input remains a sufficient
+explanation for a black output for this primitive.
+
+A naturally existing program2 control draw in the same runtime produces:
+
+  PIXEL_AFTER_DRAW rgba=109,167,160,255
+
+This is an observational positive control: native rasterization, color writes,
+FBO0 binding, and the readback path can produce non-black pixels. No control shader
+was injected and no application state was modified.
+
+The subsequent program86 postprocess samples remain black at the center:
+
+  PIXEL_AFTER_DRAW program=86 rgba=0,0,0,255
+  PIXEL_PRE_BLIT logical=2 rgba=0,0,0,255
+  PIXEL_POST_BLIT logical=2 rgba=0,0,0,255
+
+The source render target is therefore already black before the final blit.
+
+Program chronology
+------------------
+The generation trace reports for the relevant numeric ID:
+
+  program guest/native=18 gen=16: shader17 fragment + shader2 vertex, LINK=1
+  program guest/native=18 gen=17: shader1 vertex + shader17 fragment, LINK=1
+  first selected program18 draw uses numeric program18 after gen=17
+
+The program18 sampler setter is:
+
+  guest location=0, name=sampler0, type=0x8b5e, size=1, value=0
+
+At the selected draw, texture realization reports:
+
+  program18 sampler path: guest texture=3, native texture=3, unit=0
+
+Texture 3 was allocated/uploaded before the draw:
+
+  guest/native=3, level=0, internal=0x8058, width=32, height=32,
+  format=0x80e1, type=0x1401
+
+The same run later realizes/uploads additional program18 textures, including:
+
+  guest/native=85, 32x32, internal=0x84ee, format=0x1908, type=0x1401
+  guest/native=86, 256x32, internal=0x84ee, format=0x1908, type=0x1401
+  guest/native=87, 64x64, internal=0x84ee, format=0x1908, type=0x1401
+  guest/native=90, 256x256, internal=0x84ee, format=0x1908, type=0x1401
+  guest/native=92, 512x512, internal=0x84ee, format=0x1908, type=0x1401
+
+The complete last-writer chain for texture3/program86 sampler0 is still not
+available because current tracing does not maintain a persistent texture-generation
+record. No texture mapping or lifetime fix was applied.
+
+Native error remains cleanly classified
+----------------------------------------
+The same readback run still reports exactly one native 0x502 and zero shim latches:
+
+  GUA-GETERROR returned=0x502 source=native
+  program=22 current=0 draw=0 read=1
+  native_read=0x502 purge_read=0x0
+
+The existing matrix-origin marker reports:
+
+  glUniformMatrix4fv program=22 guest/native loc=1 count=1 transpose=0
+  values m0=0.75 m1=0 m2=0 m3=0
+
+The readback instrumentation did not change the source classification; 0x502 was
+already reproduced in the clean no-readback run.
+
+Safety/cleanup
+--------------
+- latest diagnostic runtime restored after the A/B:
+  libGL SHA-256 37fe3fe0d86ace2bb1b746846396c48f788b6d8d3bfb5f53887accc6c78cf1a8
+  Box64 SHA-256 6f55a18f5e3f5eaadd293b046e1428f4aca7bd50ce6462ceffc11a4fca4849d5
+- test game/Box64 processes cleaned; no unrelated production process was killed
+- remote logs removed only after local copy and SHA verification
+
+Conclusion
+----------
+Proven:
+  1. program18 center readback stays black;
+  2. an existing program2 pass produces non-black pixels in the same native path;
+  3. program18 all six first-primitive colors are RGB zero;
+  4. program86 input and pre/post-blit pixels are already black;
+  5. native 0x502 persists independently of readback diagnostics.
+
+Still open:
+  - exact program18 triangle covered sample rather than center/bbox inference;
+  - full generation-keyed P18 uniform table;
+  - persistent texture writer/producer chain;
+  - whether program18's zero vertex color is intentional application state or an
+    ABI/attribute conversion issue.
+
+The next plan should not force white vertex color. It should classify application
+color provenance and compare a covered sample of the same primitive, then trace the
+actual texture generation consumed by sampler0 into its last writer.

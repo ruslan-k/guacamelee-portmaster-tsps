@@ -1,0 +1,23 @@
+# Draw/program/swap classification — Phase 3
+
+Trace library: `libGL-phase3-trace.so.1`, AArch64
+SHA-256: `a791261dc36ca801a18b0a65ca51bc924a81315974f4961f1c99f580ad1f5227`
+Swap shim: `libswaptrace.so`, AArch64
+SHA-256: `9558954f9336a9c07aff2a8a8bdfe1dba2073e48a145f4c9887387a1292dc1c1`
+Raw log: `phase3-full.log`
+Raw log SHA-256: `536541e540324fc2e0cdb69cee0e36afadd7f497a6c7049100dfb994e5dc140a`
+
+Observed in 20-second original-game run:
+
+```text
+GUA-DRAW actual events: 256 (bounded cap reached)
+first draw: COMMON mode=0x5 first=0 count=4 len=4 instances=1 logical_fbo=3
+shader compile markers: 140, all shown statuses=1
+program link/use markers: 256 bounded events, all observed linked=1
+FMOD init succeeded with driver 1
+SIGSEGV: none
+```
+
+The native AArch64 LD_PRELOAD swap shim emitted zero `GUA-SWAP` events. Box64's generated SDL2 wrapper does not pass through a native interposable symbol in this configuration. Therefore swap invocation remains unproven; no ioctl or symbol-resolution line is counted as a swap.
+
+This proves that the black-screen path is not caused by absence of game draw calls or shader/program link failure. It remains consistent with a draw-to-broken-FBO, resolve/blit, or later presentation boundary.

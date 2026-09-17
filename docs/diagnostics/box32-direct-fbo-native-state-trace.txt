@@ -1,0 +1,25 @@
+# gl4es post-native state trace — Phase 2
+
+Trace library: `libGL-fbo-native-state-trace.so.1`, AArch64
+SHA-256: `60c4b65936a7ddc1ff4674e5205b72b0cff3345fa11a19089797ca34a564301a`
+Raw log: `fbo-native-state.log`
+Raw log SHA-256: `a7416f52d38230d1285078f811de4ed5b5940eaecd78045da69af97c1a7dd0f2`
+
+The trace runs the original game binary with affinity+sched shims and no rendering hacks (`LIBGL_FBOFORCETEX=0`).
+
+Post-native renderbuffer state:
+
+```text
+logical=1 native=1 requested=0x8056 actual=0x8056 1280x720
+logical=2 native=2 requested=0x81a5 actual=0x81a5 1280x720
+
+logical FBO 1:
+DEPTH attachment -> native type=0x8d41 name=2 binding=1
+STENCIL attachment -> native type=0x8d41 name=3 binding=1
+```
+
+The first logical FBO still reports `0x8cd7` after color-only setup and `0x8cdd` after depth/stencil setup. Texture-backed FBOs 2–5 report `0x8cd7`. The expected `TEX_ATTACH_POST` marker did not appear, so the texture post-query branch is not yet proven and must be corrected separately; this absence is recorded rather than interpreted as `GL_NONE`.
+
+The game stayed alive through the run and FMOD reported `FMOD init succeeded with driver 1`.
+
+Conclusion: native controls are complete, gl4es creates real native renderbuffers/attachments, and the remaining issue is in the texture attachment/state path or later render pass. No production library was replaced.

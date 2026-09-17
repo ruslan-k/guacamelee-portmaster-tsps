@@ -1,0 +1,162 @@
+# Program21 generated/default pass classification
+
+## Scope
+
+Diagnostic-only TSPS runs. Production launcher, production package, paid `game-bin`, and production Box86/ARMHF bridge were not changed.
+
+Common runtime remained:
+
+```text
+original gamedata cwd
+SDL_VIDEODRIVER=KMSDRM
+native SDL EGL/GLES paths
+BOX64_WRAP_EGL=1
+BOX64_DLSYM_ERROR=1
+BOX64_PREFER_WRAPPED=1
+BOX64_MMAP32=1
+affinityshim + schedshim only
+no X11 stub
+no LIBGL_FB
+no LIBGL_FBOFORCETEX
+no LIBGL_SHRINK
+LIBGL_NOTEST=1
+```
+
+## Artifacts
+
+Uniform all-family log:
+
+```text
+/mnt/external/Hermes/uniall.log
+SHA-256=d61df417e990127e1c2f21f46bbce43198d0bf038b3f52479c423318b2e05c1c
+```
+
+Shader source dump log:
+
+```text
+/mnt/external/Hermes/srcdump.log
+SHA-256=c9f52d4c60c1a206ba8d9caedf7b0ba3ca77b8824abd36c718e762c7cc4caea8
+```
+
+Shader/program classifier log:
+
+```text
+/mnt/external/Hermes/class.log
+SHA-256=a03a732966c2bec34b3c2382216e80ff503195e61d33973b626da2d57e58b5e7
+```
+
+Final uniform-trace diagnostic libGL:
+
+```text
+SHA-256=a5471a7f75d20c3eed9222ac23afc9906baa0c5ac259a38d35f5684e33e9907f
+```
+
+## Attach/link chronology
+
+Program21 receives:
+
+```text
+GUA-ATTACH program=21 shader=19 type=0x8b30 attach_size=1 last_vert=0 last_frag=19
+GUA-ATTACH program=21 shader=20 type=0x8b31 attach_size=2 last_vert=20 last_frag=19
+```
+
+The later duplicate attach sequence is:
+
+```text
+GUA-ATTACH program=21 shader=14 type=0x8b31 attach_size=1 last_vert=14 last_frag=0
+GUA-ATTACH program=21 shader=19 type=0x8b30 attach_size=2 last_vert=14 last_frag=19
+```
+
+This confirms that numeric shader/program IDs are reused and must be interpreted with chronology.
+
+## Source classification
+
+Shader19 is a fragment shader:
+
+```glsl
+uniform vec4 vMult;
+void main() {
+    gl_FragColor = vMult;
+}
+```
+
+Shader20's vertex source is:
+
+```glsl
+varying vec4 v_texcoord0;
+void main()
+{
+    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+    v_texcoord0 = vec4(0.5, 0.5, 0.5, 0.5);
+}
+```
+
+Classifier result:
+
+```text
+shader20 type=GL_VERTEX_SHADER
+pos=1
+zero_pos=1
+texture2D=0
+vMult=0
+```
+
+The literal zero-position source is not present in the pinned gl4es source tree or gl4es binary. It is therefore an application-provided/generated fallback source, not a hard-coded gl4es blit shader.
+
+## Uniform evidence
+
+All setter families were covered through common `GoUniformfv/GoUniformiv` paths. For program21:
+
+```text
+uniform name=vMult
+type=0x8b52 (vec4)
+location=0
+value repeatedly=0,0,0,0
+```
+
+`glUniform1i` produced no program21 records because this pair has no sampler uniform. The zero value is the fragment output for shader19.
+
+## Pixel correlation
+
+At the first observed program21 draw:
+
+```text
+logical/native FBO=3/3
+program=21
+viewport=0,0,1280,720
+scissor=disabled
+color mask=1111
+blend=0 depth=0 cull=0
+PIXEL_AFTER_DRAW rgba=0,0,0,0
+```
+
+This is expected from the shader pair: all vertices are at one clip-space point and the fragment output is transparent black. This pass is proven non-visible and should not be “fixed” by forcing `vMult` or rewriting the shader.
+
+## Classification
+
+```text
+program21 compile/link/use: PASS
+program21 shader pair: generated/default non-visible pass
+program21 zero position: EXPLAINED
+program21 vMult zero: EXPLAINED by fragment output path
+native FBO3 binding: PASS
+viewport/scissor/color mask: PASS
+first program21 draw visible: IMPOSSIBLE
+whole game black screen: NOT YET EXPLAINED
+```
+
+The earlier conclusion “program21 zero uniform is the root cause” is superseded. It is a symptom/intentional fallback pass. The next relevant pass must be identified by finding the first game program with a non-zero `gl_Position` and a non-transparent fragment output.
+
+## Next handoff
+
+The next plan should:
+
+```text
+classify all shader sources by zero_pos and transparent/constant fragment output
+log program attach sets and first draw for each program
+identify the first non-dummy game program after program21
+trace its vertex attributes and all uniform families
+trace its texture-unit bindings and source texture provenance
+```
+
+Do not add another FBO flag, presenter workaround, or shader rewrite before this chronology is known.

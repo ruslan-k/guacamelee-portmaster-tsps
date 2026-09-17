@@ -1,0 +1,47 @@
+# Program2 native draw window
+
+P2_NATIVE_DRAW_DIRECT_502=DISPROVEN
+P2_NONBLACK_AND_502_SAME_PROGRAM_GENERATION=UNKNOWN
+
+Exact clean window:
+
+```text
+P2_DRAW_PRE_EXISTING_ERROR=none
+P2_DRAW_PRE_CLEAN=1 errors=0
+P2_DRAW_POST_ERROR=0x0
+```
+
+The native draw was executed exactly once. No GLES query/readback was inserted
+between the final clean poll and `gles_glDrawArrays`. This disproves the draw as
+the direct producer. Earlier post-draw `0x502` evidence is superseded as direct
+attribution because it lacked pre-clean proof.
+
+Segment evidence:
+
+```text
+P2_SEG_PRE_REALIZE_CLEAN=1 errors=0
+P2_SEG_POST_REALIZE_ERROR=0x0 in the per-call run
+P2_CALL_* texture/buffer/attribute PRE errors=none
+P2_CALL_* texture/buffer/attribute CLEAN=1
+P2_DRAW_POST_ERROR=0x0
+```
+
+The first segment run without per-call checkpoints saw a post-realize candidate;
+per-call checkpoints consumed no error in texture, buffer or attribute calls.
+The remaining `realize_glenv` program/uniform/fixed-state region is not yet
+split to a single call.
+
+Raw logs:
+
+```text
+/mnt/external/Hermes/guac-p2win-runtime.log
+SHA-256=d09a404b5993999ef6e8c013a32609a355a927d607b48bc5b90e29e123751d48
+
+/mnt/external/Hermes/guac-p2full-runtime.log
+SHA-256=7e0591478ae8ac3a04406dbdd8920c49fda359f5d1688a77772e60aabf3673de
+
+/mnt/external/Hermes/guac-p2fpe2-runtime.log
+SHA-256=53e44870fed18dac2394f7fed177f6b6548c1300d6c82b4bf138e2ad5bf89f2a
+```
+
+No compatibility fix selected.

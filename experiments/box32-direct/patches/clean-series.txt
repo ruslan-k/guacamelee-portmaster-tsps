@@ -1,0 +1,6 @@
+# Production-candidate gl4es patch series only.
+# Diagnostic traces and historical presenter changes are intentionally excluded.
+#
+# experiments/box32-direct/src/gl4es-notest-maxcolorattach.patch
+# experiments/box32-direct/src/gl4es-notest-depthstencil.patch
+# <future proven general fix only>

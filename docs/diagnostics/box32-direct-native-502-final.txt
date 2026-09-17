@@ -1,0 +1,69 @@
+Guacamelee Box32 direct — final native 0x502 attribution
+Date: 2026-09-17
+
+Direct producer result
+----------------------
+A diagnostic-only immediate native glGetError was read directly after the native
+`gles_glUniformMatrix4fv()` call for program22. Native location was also queried
+by uniform name before the call.
+
+First occurrence:
+
+  program_guest=22 program_native=22
+  native_current_before=22
+  cached/native location=1/1
+  queried native location by name=1
+  count=1 transpose=0
+  matrix=(0.75,0,0,0,0,1,0,0,0,0,0.000500049966,0,0,0.5,0.000400039979,1)
+  immediate native glGetError=0x502
+  native_current_after=22
+
+Second matrix call in the same runtime:
+
+  cached/native location=1/1
+  queried native location by name=1
+  immediate native glGetError=0x0
+
+The first call is therefore directly proven to be the producer of native
+`GL_INVALID_OPERATION (0x502)`. The program is current, the location is valid,
+and all matrix values are finite. This is not a shadow/native program mismatch
+and not a stale uniform-location mismatch.
+
+Required classification
+-----------------------
+NATIVE_502_PRODUCER=glUniformMatrix4fv
+NATIVE_502_CAUSE=INVALID_NATIVE_UNIFORM_STATE_OR_DRIVER_VALIDATION
+
+The exact GLES driver validation reason is not available through the error code.
+No uniform rewrite, rebind, error masking, or Guacamelee-specific workaround was
+applied. The immediate readback is diagnostic-only and is not installed as the
+runtime behavior.
+
+Raw evidence
+------------
+  /mnt/external/Hermes/guac-immed-runtime.log
+  size=678251 bytes
+  SHA-256=63f23c7e83382fbcb9a0e6beb6bf16ba3cd51d9cbc70f8b28e8692ccc3f14922
+
+Independent native FBO evidence
+--------------------------------
+A separate read-only native binding run shows scene draws use:
+
+  logical current=0, logical draw=0, logical read=1
+  native framebuffer binding=0
+  mainfbo_fbo=0
+
+The resolve path uses FBO1 as read and FBO2 as draw. Source readback with a
+temporary native read-FBO1 binding is black before BLIT; FBO2 is black after BLIT.
+Thus the 0x502 and the black source are separate classified branches at this
+stage.
+
+Safety/restoration
+------------------
+The latest diagnostic runtime remains installed on TSPS, per user preference:
+
+  libGL 37fe3fe0d86ace2bb1b746846396c48f788b6d8d3bfb5f53887accc6c78cf1a8
+  Box64 6f55a18f5e3f5eaadd293b046e1428f4aca7bd50ce6462ceffc11a4fca4849d5
+
+The immediate-error run was cleaned; no production launcher, game binary,
+ARMHF bridge, input, audio or presenter was changed.

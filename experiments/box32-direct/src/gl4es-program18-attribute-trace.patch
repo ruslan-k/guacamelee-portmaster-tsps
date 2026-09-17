@@ -1,0 +1,26 @@
+diff --git a/src/gl/vertexattrib.c b/src/gl/vertexattrib.c
+index 461712d..b70cae3 100644
+--- a/src/gl/vertexattrib.c
++++ b/src/gl/vertexattrib.c
+@@ -37,15 +37,17 @@ void APIENTRY_GL4ES gl4es_glVertexAttribPointer(GLuint index, GLint size, GLenum
+     v->pointer = pointer;
+     v->buffer = glstate->vao->vertex;
+     if( v->buffer ) {
+-		v->real_buffer = v->buffer->real_buffer;
+-		v->real_pointer = pointer;
+-	} else {
++        v->real_buffer = v->buffer->real_buffer;
++        v->real_pointer = pointer;
++    } else {
+         v->real_buffer = 0;
+         v->real_pointer = 0;
+     }
++    if (getenv("GUA_ATTRIB_TRACE") && (glstate->glsl && glstate->glsl->program == 18))
++        fprintf(stderr, "GUA-GL4ES-ATTRIB-IN index=%u size=%d type=0x%x normalized=%d stride=%d pointer=%p vbo=%p enabled=%d integer=%d\\n", index, size, type, normalized, stride, pointer, (void*)v->buffer, v->enabled, v->integer);
+ }
+ void APIENTRY_GL4ES gl4es_glVertexAttribIPointer(GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid * pointer) {
+-    DBG(printf("glVertexAttribIPointer(%d, %d, %s, %d, %p), vertex buffer = %p\n", index, size, PrintEnum(type), stride, pointer, (glstate->vao->vertex)?glstate->vao->vertex->data:0);)
++    DBG(printf("glVertexAttribIPointer(%d, %d, %s, %d, %p), vertex buffer = %p\\n", index, size, PrintEnum(type), stride, pointer, (glstate->vao->vertex)?glstate->vao->vertex->data:0);)
+     FLUSH_BEGINEND;
+     // sanity test
+     if(index>=hardext.maxvattrib) {

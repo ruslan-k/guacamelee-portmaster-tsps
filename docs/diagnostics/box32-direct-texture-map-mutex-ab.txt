@@ -1,0 +1,49 @@
+# Texture-map mutex A/B
+
+## Scope
+
+A minimal reversible diagnostic A/B added a portable `pthread_mutex_t` around `gl4es_getTexture()` lookup/insert. No native FBO behavior, texture remap, shader code, or presenter code was changed.
+
+Diagnostic library SHA-256:
+
+```text
+cea7bf9952e020b422ed9b097513e06b3356a180b624d47d4918d3d08265c147
+```
+
+## Runtime result
+
+```text
+GUA-ATTACH-STEP: 4 ENTRY markers
+post-entry attachment markers: 0
+GUA-TEX-LOOKUP: 128
+AFTER_KH_GET: 42
+GUA-SWAP: 304
+glError 0x506: 4123
+SIGSEGV: 0
+```
+
+Framebuffer capture:
+
+```text
+SHA-256:
+fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+The image remained uniformly black.
+
+The mutex did not make the FBO attachment function reach `AFTER_GET`, `BEFORE_PUSH`, or `AFTER_SET`, and did not improve the visual result. It is therefore rejected as a fix.
+
+## Classification
+
+```text
+simple texture-map serialization: FAIL
+visual output: FAIL
+FBO errors: persist
+production package: unchanged
+```
+
+## Blocker state
+
+Earlier live thread inspection showed the main thread in `R (running)` while the expected FBO guest texture lookup did not produce its post-lookup marker. The portable mutex A/B produced the same result. This is consistent with a guest-side emulation/dispatch execution boundary or a non-returning lookup path, but a production fix is not proven.
+
+The next diagnostic must use guest/application-level call tracing or debugger-level PC/backtrace capture around the first FBO texture call. Do not add further FBO capability flags or presentation workarounds.

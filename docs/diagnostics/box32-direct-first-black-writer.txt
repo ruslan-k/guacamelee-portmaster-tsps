@@ -1,0 +1,69 @@
+Guacamelee Box32 direct — first black writer
+Date: 2026-09-17
+
+FIRST_BLACK_WRITER=program86
+
+Raw transition runtime:
+  /mnt/external/Hermes/guac-transition-runtime.log
+  SHA-256 e22498852c7d79969467029c78df6791eea45d9b53e2db4916f104c998fc355d
+  size 618939 bytes
+
+Ordered transitions
+-------------------
+Program18 is not the first black writer:
+
+  program18 BEFORE_DRAW rgba=0,0,0,255
+  program18 AFTER_DRAW  rgba=0,0,0,255
+
+A natural program2 pass can make the same sampled point non-black:
+
+  program2 AFTER_DRAW rgba=109,167,160,255
+
+The first confirmed non-black-to-black transition is:
+
+  PIXEL_BEFORE_DRAW seq=48
+    program=86, logical_fbo=0, native=0
+    rgba=109,167,160,255
+    blend=0 mask=1111 depth=0 cull=0
+    active texture unit=2, sampler0 texture guest/native=2/2
+
+  PIXEL_AFTER_DRAW seq=49
+    program=86, logical_fbo=0, native=0
+    rgba=0,0,0,255
+    blend=0 mask=1111 depth=0 cull=0
+
+This repeats on later frames. Thus program86 is the causal writer of the sampled
+backbuffer transition; program18 is already black before its selected draw.
+
+Program86 input state
+---------------------
+At the causal draw:
+
+  program86 sampler0 guest texture=2, native texture=2
+  realization reports current native binding/actual texture 83 on first cycle
+  texture2 was created as 1280x720 RGBA storage and attached as FBO2 color0
+  FBO2 status=0x8cd5
+
+Program86 is fullscreen geometry and blend is disabled at the causal draw.
+The result is therefore consistent with program86 sampling a black main-image
+texture and writing that result over the non-black FBO0 point. No presenter or
+swap behavior is involved.
+
+Control chronology
+------------------
+Program2 with white color can produce (109,167,160,255), but its output is later
+overwritten by program86. Program18's zero RGB vertex color explains why its
+own selected primitive does not make the point non-black, but it is not the first
+transition responsible for the visible black frame.
+
+What remains
+------------
+A persistent texture-generation graph (create/delete/upload/attachment/last GPU
+writer) has not yet been implemented, so the exact producer of texture2 before
+program86 remains incomplete. No texture mapping or lifecycle fix was applied.
+
+Restoration
+-----------
+Latest diagnostic ELF hashes restored on device:
+  libGL 37fe3fe0d86ace2bb1b746846396c48f788b6d8d3bfb5f53887accc6c78cf1a8
+  Box64 6f55a18f5e3f5eaadd293b046e1428f4aca7bd50ce6462ceffc11a4fca4849d5

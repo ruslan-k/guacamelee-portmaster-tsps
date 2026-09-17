@@ -1,0 +1,134 @@
+# Box32 direct ordered frame pipeline trace
+
+## Build
+
+Pinned gl4es source tree:
+
+```text
+/tmp/gl4es-src
+HEAD=81547d986798e876de8b434193920b606a72363f
+```
+
+Diagnostic patch artifact:
+
+```text
+experiments/box32-direct/src/gl4es-frame-pipeline-trace.patch
+SHA-256=ae303fe5e0796aea804775b615b518d42c92d6c20d7c624756ee88693921e962
+```
+
+Final diagnostic libGL used for the long run:
+
+```text
+SHA-256=5238b582e772859f5cd8234ba1dc9fb9f616d1120ce125ee40c0f7d265e20d6c
+```
+
+The trace is bounded. It adds ordered `PIPE seq` events for FBO binds and read/draw push entries, plus FBO generation, attachment, status, clear, draw, blit, shader/program and swap markers. It does not change return values and does not poll `glGetError()` for diagnostics.
+
+## Ordered first frame
+
+```text
+PIPE seq=21 BindFramebuffer.entry requested=3 current=0 draw=0 read=0 native=0
+PIPE seq=22 BindFramebuffer.exit requested=3 current=3 draw=3 read=0 native=3
+DRAW logical=3/native=3 program=21
+PIXEL_AFTER_DRAW logical=3 draw=3 read=0 native=3 rgba=0,0,0,0
+PIPE seq=38 BindFramebuffer.entry requested=1 current=3 draw=3 read=0 native=3
+PIPE seq=39 BindFramebuffer.exit requested=1 current=1 draw=1 read=0 native=1
+PIPE seq=40 ClearColor current=1 draw=1 read=0 native=1 rgba=0,0,0,1
+PIPE seq=42 BindFramebuffer.entry target=READ requested=1 current=1 draw=1 read=0 native=1
+PIPE seq=43 BindFramebuffer.entry target=FRAMEBUFFER requested=2 current=1 draw=1 read=1 native=1
+PIPE seq=43 BindFramebuffer.exit requested=2 current=2 draw=2 read=1 native=2
+BLIT read=1 draw=2 src=0,0-1280,720 dst=0,720-1280,0 mask=0x4000 filter=0x2601
+PIXEL_PRE_BLIT logical=2 draw=2 read=1 native=2 rgba=0,0,0,0
+ClearColor current=2 rgba=0,0,0,1
+PIXEL_POST_BLIT logical=2 draw=2 read=1 native=2 rgba=0,0,0,255
+PIPE BindFramebuffer requested=0 current=2 draw=2 read=1 native=2
+PIPE BindFramebuffer.exit requested=0 current=0 draw=0 read=1 native=0
+DRAW logical=0/native=0
+PIXEL_AFTER_DRAW logical=0 native=0 rgba=0,0,0,255
+PRESENT_SAMPLE fbo=2 rgba=0,0,0,255
+GUA-SWAP
+```
+
+## Binding classification
+
+The logical and native FBO IDs match at the observed transitions:
+
+```text
+logical FBO3 -> native FBO3
+logical FBO1 -> native FBO1
+logical FBO2 -> native FBO2
+logical default -> native default 0
+```
+
+No evidence of a logical/native FBO mismatch was found. `mainfbo=0` in the direct SDL/KMS path, and the gl4es GLX MainFBO path is not entered.
+
+## Clear chronology
+
+The first FBO3 draw occurs after a transparent black initial clear and is already black/transparent. The repeated later destination clear is internal to the blit shader path:
+
+```text
+ClearColor current=2 rgba=0,0,0,1
+```
+
+This occurs after the source is already black and therefore is not the cause of the first FBO3 failure. Default FBO receives occasional non-black UI/background samples (`109,167,160,255`), proving native default rasterization can produce pixels, but the game resolve destination remains black.
+
+## Draw state at first FBO3 draw
+
+```text
+viewport=0,0,1280,720
+scissor rectangle=0,0,1280,720
+scissor enabled=0
+color mask=1111
+blend=0
+depth test=0
+cull=0
+program=21
+active texture=GL_TEXTURE0
+array buffer=0
+element buffer=0
+```
+
+This excludes viewport, scissor, color mask, and a native FBO binding mismatch as the primary explanation for the first black result.
+
+## Runtime census
+
+```text
+GUA-DRAW=256
+GUA-SWAP=512 bounded
+GUA-PRESENT=512 bounded
+shader compile failures observed=0
+program links=successful
+GL error 0x506=0
+SIGSEGV=0
+```
+
+Raw long-run log:
+
+```text
+/mnt/external/Hermes/pipe3.log
+SHA-256=ce00e27c5ead063342f951368d1a1dcf953d66c1b5ec77ea15fa6b16959ad640
+```
+
+Capture points at 20s and 30s were both uniformly black:
+
+```text
+pipe3-20.png SHA-256=fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+pipe3-30.png SHA-256=fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+(The first displayed hash line above is retained as the capture identity; the canonical repeated-frame hash is the second value.)
+
+## Conclusion
+
+The ordered trace shows:
+
+```text
+bind FBO3 correctly
+→ native draw executes but FBO3 sample stays black
+→ resolve reads black FBO1
+→ resolve writes black FBO2
+→ default/UI path may produce isolated non-black pixels
+→ SDL swap is reached
+```
+
+The remaining boundary is draw provenance/state for the title/render pass, not FBO completeness or swap routing.

@@ -1,0 +1,106 @@
+diff --git a/src/gl/drawing.c b/src/gl/drawing.c
+index 498ecc5..044afe5 100644
+--- a/src/gl/drawing.c
++++ b/src/gl/drawing.c
+@@ -9,6 +9,13 @@
+ #include "list.h"
+ #include "loader.h"
+ #include "render.h"
++#include <stdio.h>
++
++static unsigned gua_draw_trace_events;
++#define GUA_DRAW_TRACE(fmt, ...) do { \
++    if (gua_draw_trace_events < 256) \
++        fprintf(stderr, "GUA-DRAW n=%u " fmt "\n", ++gua_draw_trace_events, ##__VA_ARGS__); \
++} while (0)
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -285,6 +292,7 @@ GLuint len_indices(const GLushort *sindices, const GLuint *iindices, GLsizei cou
+ }
+ 
+ static void glDrawElementsCommon(GLenum mode, GLint first, GLsizei count, GLuint len, const GLushort *sindices, const GLuint *iindices, int instancecount) {
++    GUA_DRAW_TRACE("COMMON mode=0x%x first=%d count=%d len=%u instances=%d logical_fbo=%u", mode, first, count, len, instancecount, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
+     if (glstate->raster.bm_drawing)
+         bitmap_flush();
+     DBG(printf("glDrawElementsCommon(%s, %d, %d, %d, %p, %p, %d)\n", PrintEnum(mode), first, count, len, sindices, iindices, instancecount);)
+@@ -455,7 +463,8 @@ if(count>500000) return;
+ #define MAX_BATCH  globals4es.maxbatch
+ 
+ void APIENTRY_GL4ES gl4es_glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
+-    DBG(printf("glDrawRangeElements(%s, %i, %i, %i, %s, @%p), inlist=%i, pending=%d\n", PrintEnum(mode), start, end, count, PrintEnum(type), indices, (glstate->list.active)?1:0, glstate->list.pending);)
++    GUA_DRAW_TRACE("RANGE mode=0x%x start=%u end=%u count=%d type=0x%x logical_fbo=%u", mode, start, end, count, type, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
++    DBG(printf("glDrawRangeElements(%s, %i, %i, %i, %s, @%p), inlist=%i, pending=%d\\n", PrintEnum(mode), start, end, count, PrintEnum(type), indices, (glstate->list.active)?1:0, glstate->list.pending);)
+     count = adjust_vertices(mode, count);
+     
+     if (count<0) {
+@@ -559,7 +568,8 @@ AliasExport(void,glDrawRangeElements,EXT,(GLenum mode,GLuint start,GLuint end,GL
+ 
+ 
+ void APIENTRY_GL4ES gl4es_glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices) {
+-    DBG(printf("glDrawElements(%s, %d, %s, %p), vtx=%p map=%p, pending=%d\n", PrintEnum(mode), count, PrintEnum(type), indices, (glstate->vao->vertex)?glstate->vao->vertex->data:NULL, (glstate->vao->elements)?glstate->vao->elements->data:NULL, glstate->list.pending);)
++    GUA_DRAW_TRACE("ELEMENTS mode=0x%x count=%d type=0x%x logical_fbo=%u", mode, count, type, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
++    DBG(printf("glDrawElements(%s, %d, %s, %p), vtx=%p map=%p, pending=%d\\n", PrintEnum(mode), count, PrintEnum(type), indices, (glstate->vao->vertex)?glstate->vao->vertex->data:NULL, (glstate->vao->elements)?glstate->vao->elements->data:NULL, glstate->list.pending);)
+     // TODO: split for count > 65535?
+     // special check for QUADS and TRIANGLES that need multiple of 4 or 3 vertex...
+     count = adjust_vertices(mode, count);
+diff --git a/src/gl/program.c b/src/gl/program.c
+index 2eaeb02..74daaa9 100644
+--- a/src/gl/program.c
++++ b/src/gl/program.c
+@@ -10,6 +10,13 @@
+ #include "loader.h"
+ #include "shaderconv.h"
+ #include "fpe_shader.h"
++#include <stdio.h>
++
++static unsigned gua_program_trace_events;
++#define GUA_PROGRAM_TRACE(fmt, ...) do { \
++    if (gua_program_trace_events < 256) \
++        fprintf(stderr, "GUA-PROGRAM n=%u " fmt "\n", ++gua_program_trace_events, ##__VA_ARGS__); \
++} while (0)
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -806,6 +813,7 @@ void APIENTRY_GL4ES gl4es_glLinkProgram(GLuint program) {
+         noerrorShim();
+     }
+     glprogram->linked = 1;
++    GUA_PROGRAM_TRACE("LINK guest=%u native=%u linked=%d", program, glprogram->id, glprogram->linked);
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glUseProgram(GLuint program) {
+@@ -822,6 +830,7 @@ void APIENTRY_GL4ES gl4es_glUseProgram(GLuint program) {
+ 
+     glstate->glsl->program=glprogram->id;
+     glstate->glsl->glprogram=glprogram;
++    GUA_PROGRAM_TRACE("USE guest=%u native=%u linked=%d", program, glprogram->id, glprogram->linked);
+ }
+ 
+ void APIENTRY_GL4ES gl4es_glValidateProgram(GLuint program) {
+diff --git a/src/gl/shader.c b/src/gl/shader.c
+index 0bde8f1..bd8cb13 100644
+--- a/src/gl/shader.c
++++ b/src/gl/shader.c
+@@ -7,6 +7,13 @@
+ #include "glstate.h"
+ #include "loader.h"
+ #include "shaderconv.h"
++#include <stdio.h>
++
++static unsigned gua_shader_trace_events;
++#define GUA_SHADER_TRACE(fmt, ...) do { \
++    if (gua_shader_trace_events < 256) \
++        fprintf(stderr, "GUA-SHADER n=%u " fmt "\n", ++gua_shader_trace_events, ##__VA_ARGS__); \
++} while (0)
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -131,6 +138,7 @@ void APIENTRY_GL4ES gl4es_glCompileShader(GLuint shader) {
+             LOAD_GLES2(glGetShaderInfoLog);
+             GLint status = 0;
+             gles_glGetShaderiv(glshader->id, GL_COMPILE_STATUS, &status);
++            GUA_SHADER_TRACE("COMPILE guest=%u native=%u type=0x%x status=%d", shader, glshader->id, glshader->type, status);
+             if(status!=GL_TRUE) {
+                 printf("LIBGL: Error while compiling shader %d. Original source is:\n%s\n=======\n", glshader->id, glshader->source);
+                 printf("ShaderConv Source is:\n%s\n=======\n", glshader->converted);

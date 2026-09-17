@@ -1,0 +1,110 @@
+# Guacamelee layout A/B and post-NULL diagnostics
+
+Date: 2026-09-16
+Device: TSPS / Longan
+Box64: `ac602ca9aac22aaad86951b6fb0a68a62f08b4ee9ffd7ff2823a946267fc2d00`
+GL4ES: AArch64 v1.1.7, `NOX11=ON`, `GLX_STUBS=ON`
+
+## Binary identity
+
+```text
+gamedata/game-bin
+SHA-256 cfab463cab9f734588bae0a9c102be89699c747ed0e51235e384eb02cff08d6b
+offset 0x858da3: e8 08 b0 7a ff
+
+gamedata/game-bin.box32-direct (temporary, deleted after test)
+SHA-256 5aa2a2cc89d79912a4036ce5aca344fa6cc6f8767e346b8d271c3b76300aa063
+offset 0x858da3: 90 90 90 90 90
+```
+
+The temporary file was created only after verifying the original bytes and was deleted after the A/B. The original hash was read back unchanged.
+
+Correct i386 disassembly mapping:
+
+```text
+file offset 0x858da3 -> virtual address 0x88a0da3
+0x88a0da3: call 0x804bdb0 <pthread_attr_setaffinity_np@plt>
+```
+
+This NOP is not `pthread_setschedprio`. The separate sched shim overrides `pthread_setschedprio` only.
+
+## A — original binary in original Linux layout
+
+```text
+cwd:    /mnt/SDCARD/Data/ports/guacamelee/gamedata
+binary: ./game-bin
+archives: same directory
+NOP:    absent
+sched shim: first run absent, then one-variable rerun enabled
+```
+
+Without sched shim, `pthread_setschedprio` returned 3 and the process remained at two threads after opening the default archives; it did not reach shader lookup in the observation window.
+
+With only the known sched shim added, the process again opened `misc.dat`, `levels.dat`, `resources.dat` and parsed `preinit.ini`, but did not progress into the shader bootstrap during the observation window. This is classified as a scheduling/initialization control difference, not as evidence that the archive is missing.
+
+## B — temporary NOP binary beside archives
+
+```text
+cwd:    /mnt/SDCARD/Data/ports/guacamelee/gamedata
+binary: ./game-bin.box32-direct
+archives: same directory
+NOP:    only change at 0x858da3
+sched shim: enabled
+X11 stub: not exposed
+```
+
+The run proved the layout effect:
+
+```text
+fopen64("shaders.dat.ogl", "rb") -> success
+ glXGetCurrentDisplay -> return 0x0
+shader source names resolved, including .\\Shaders\\vs_2d_main.vsh
+```
+
+The run then reached the shader subsystem and stayed alive with 22 threads and 393112 kB RSS. It produced shader program activity:
+
+```text
+glCreateShader calls: 102
+glCompileShader calls: 102
+glLinkProgram calls: 87
+glUseProgram calls: 174
+glClear calls: 4
+glDrawArrays calls: 0
+glDrawElements calls: 0
+SDL_GL_SwapWindow calls: 1
+```
+
+The first title-related shader names were loaded and compiled/linked through gl4es, including `vs_2d_main.vsh`, `vs_2d_main_plain.vsh`, and the other listed engine shaders. `glXGetCurrentDisplay` returned NULL safely through the generic Box64 fix. No `fclose(NULL)` crash occurred in this run.
+
+A separate log line reported:
+
+```text
+GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT
+```
+
+This is the next graphics boundary, but it is not yet a visual classification because no first game draw was observed. FMOD separately initialized its PCM thread but reported:
+
+```text
+SoundMgrFmod::Init(): Fmod init with driver 0 failed: "Error initializing output device." (60)
+```
+
+A `snd_pcm_writei(..., 0x400)` loop was nevertheless observed; this is not accepted as audible-output proof.
+
+The live KMS helper returned `rc=134`/zero-byte output during the long Box32 game run, so no physical game frame is claimed. The temporary run was then terminated by exact PID and the temporary binary deleted.
+
+The Guacamelee temporary run used the exact released-owner handoff, but the direct launcher itself currently overwrites `SDL_KMSDRM_REQUIRE_DRM_MASTER=1` from the caller to `0`. Therefore strict DRM-master PASS applies to the independent native/Box32 probes; the Guacamelee run proves only that it can use the already-released KMS context. The launcher should not be changed to strict mode until a visible game frame is proven and normal menu handoff is tested.
+
+## Current classification
+```text
+layout/archive lookup:     B succeeds, A does not progress in observation window
+shader archive open:       PASS in B
+shader source lookup:      PASS in B
+shader compile/link:       PASS markers in B
+first game draw:           NOT PROVEN (0 DrawArrays/DrawElements in captured counters)
+first game swap:           only 1 SDL swap marker, not title-frame proof
+FBO status:                INCOMPLETE_MISSING_ATTACHMENT observed
+FMOD audible output:       NOT PROVEN; driver 0 error 60
+input:                     NOT TESTED
+```
+
+The smallest next experiment is not a rendering workaround: preserve the colocated layout and isolate the first FBO attachment transition, while keeping the known working native/Box32 magenta probes as controls. Do not patch `fclose(NULL)` or add loose shader files yet.

@@ -1,0 +1,19 @@
+# DRM master probe evidence
+
+Date: 2026-09-16
+Binary: AArch64 ELF `drm_master_probe`
+SHA-256: `def166dd2e12d2661a6781228b1b09d007c04fc540aa8c07617a362c3702191a`
+
+Normal UI / MainUI alive:
+
+```text
+setmaster_rc=-1 errno=16(Device or resource busy)
+```
+
+After stopping the exact `principal.sh` supervisor and its current MainUI child, with no remaining `/dev/dri/card0` opener:
+
+```text
+setmaster_rc=0 errno=0(Success)
+```
+
+The probe immediately called `DRM_IOCTL_DROP_MASTER` after success. This establishes that the earlier black native run was contaminated by DRM ownership; strict native mode was rerun only after the exact owner was released.

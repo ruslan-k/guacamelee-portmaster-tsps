@@ -1,0 +1,24 @@
+# i386 GLX NULL probe after Box64 fix
+
+Date: 2026-09-16
+Box64: AArch64 ELF SHA-256 `ac602ca9aac22aaad86951b6fb0a68a62f08b4ee9ffd7ff2823a946267fc2d00`
+Probe: i386 ELF SHA-256 `13a7a26c256ec2a5dabf7f1a2bdc95013cad9d310d96d5943f801fe410885294`
+
+The probe was linked with a real i386 `libGL.so.1` dependency so `glXGetCurrentDisplay` was present in `.dynsym`; the earlier unresolved-symbol build was discarded.
+
+Runtime:
+
+```text
+SDL_GL_CreateContext non-null
+Calling glXGetCurrentDisplay => return 0x0
+GLXNULL glXGetCurrentDisplay=(nil)
+no libX11.so.6 in native LD_LIBRARY_PATH
+no BOX32-X11-STUB calls
+no SIGSEGV
+GLXNULL swap=30,60,90,120
+GLXNULL hold-after-120
+```
+
+Live KMS capture: `FB ID: 163, 1280x720`, uniform full-screen magenta.
+
+Classification: **PASS**. Generic `addDisplay(NULL)` fix is independently validated on the device; no fake X11 library is needed for this path.

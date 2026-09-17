@@ -1,0 +1,471 @@
+diff --git a/src/gl/drawing.c b/src/gl/drawing.c
+index 498ecc5..24729ea 100644
+--- a/src/gl/drawing.c
++++ b/src/gl/drawing.c
+@@ -9,6 +9,16 @@
+ #include "list.h"
+ #include "loader.h"
+ #include "render.h"
++#include "framebuffers.h"
++#include <stdio.h>
++
++static unsigned gua_draw_trace_events;
++#define GUA_SAFE_F(P, I) (((uintptr_t)(P) > 0x10000) ? ((const float*)(P))[I] : 0.0f)
++#define GUA_SAFE_C(P, I) (((uintptr_t)(P) > 0x10000) ? ((const unsigned char*)(P))[I] : 0)
++#define GUA_DRAW_TRACE(fmt, ...) do { \
++    if (gua_draw_trace_events < 256) \
++        fprintf(stderr, "GUA-DRAW n=%u " fmt "\n", ++gua_draw_trace_events, ##__VA_ARGS__); \
++} while (0)
+ 
+ //#define DEBUG
+ #ifdef DEBUG
+@@ -285,6 +295,37 @@ GLuint len_indices(const GLushort *sindices, const GLuint *iindices, GLsizei cou
+ }
+ 
+ static void glDrawElementsCommon(GLenum mode, GLint first, GLsizei count, GLuint len, const GLushort *sindices, const GLuint *iindices, int instancecount) {
++    if (getenv("GUA_NATIVE_FBO_TRACE") && glstate && glstate->glsl && (glstate->glsl->program == 18 || glstate->glsl->program == 22 || glstate->glsl->program == 86)) {
++        GLint gua_native_fbo = -1;
++        LOAD_GLES2(glGetIntegerv);
++        if (gles_glGetIntegerv) gles_glGetIntegerv(GL_FRAMEBUFFER_BINDING, &gua_native_fbo);
++        fprintf(stderr, "GUA-NATIVE-FBO-DRAW program=%u logical_current=%u logical_draw=%u logical_read=%u native_binding=%d\\n", glstate->glsl->program, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, glstate->fbo.fbo_draw ? glstate->fbo.fbo_draw->id : 0, glstate->fbo.fbo_read ? glstate->fbo.fbo_read->id : 0, gua_native_fbo);
++    }
++    GUA_DRAW_TRACE("COMMON mode=0x%x first=%d count=%d len=%u instances=%d logical_fbo=%u program=%u attrib0=%d/%d/%d/%d attrib1=%d/%d/%d/%d attrib2=%d/%d/%d/%d attrib3=%d/%d/%d/%d p0=%p rp0=%p b0=%p rb0=%u p1=%p rp1=%p b1=%p rb1=%u p2=%p rp2=%p b2=%p rb2=%u v0=%.6g,%.6g,%.6g,%.6g c0=%u,%u,%u,%u", mode, first, count, len, instancecount, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, glstate->glsl ? glstate->glsl->program : 0, glstate->vao->vertexattrib[0].enabled, glstate->vao->vertexattrib[0].size, glstate->vao->vertexattrib[0].type, glstate->vao->vertexattrib[0].stride, glstate->vao->vertexattrib[1].enabled, glstate->vao->vertexattrib[1].size, glstate->vao->vertexattrib[1].type, glstate->vao->vertexattrib[1].stride, glstate->vao->vertexattrib[2].enabled, glstate->vao->vertexattrib[2].size, glstate->vao->vertexattrib[2].type, glstate->vao->vertexattrib[2].stride, glstate->vao->vertexattrib[3].enabled, glstate->vao->vertexattrib[3].size, glstate->vao->vertexattrib[3].type, glstate->vao->vertexattrib[3].stride, glstate->vao->vertexattrib[0].pointer, glstate->vao->vertexattrib[0].real_pointer, glstate->vao->vertexattrib[0].buffer, glstate->vao->vertexattrib[0].real_buffer, glstate->vao->vertexattrib[1].pointer, glstate->vao->vertexattrib[1].real_pointer, glstate->vao->vertexattrib[1].buffer, glstate->vao->vertexattrib[1].real_buffer, glstate->vao->vertexattrib[2].pointer, glstate->vao->vertexattrib[2].real_pointer, glstate->vao->vertexattrib[2].buffer, glstate->vao->vertexattrib[2].real_buffer, GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 0), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 1), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 2), GUA_SAFE_F(glstate->vao->vertexattrib[0].pointer, 3), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 0), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 1), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 2), GUA_SAFE_C(glstate->vao->vertexattrib[2].pointer, 3));
++    static unsigned gua_scene_vertex_dump;
++    if (getenv("GUA_VERTEX_TRACE") && gua_scene_vertex_dump == 0 && glstate->glsl && glstate->glsl->program == 18 && mode == GL_TRIANGLES && count >= 6 && glstate->vao->vertexattrib[ATT_VERTEX].enabled && glstate->vao->vertexattrib[2].enabled && glstate->vao->vertexattrib[ATT_VERTEX].buffer == 0 && glstate->vao->vertexattrib[2].buffer == 0 && glstate->vao->vertexattrib[ATT_VERTEX].pointer && glstate->vao->vertexattrib[2].pointer && (uintptr_t)glstate->vao->vertexattrib[ATT_VERTEX].pointer > 0x10000 && (uintptr_t)glstate->vao->vertexattrib[2].pointer > 0x10000) {
++        const vertexattrib_t *vp = &glstate->vao->vertexattrib[ATT_VERTEX];
++        const vertexattrib_t *cp = &glstate->vao->vertexattrib[2];
++        unsigned n = count < 6 ? count : 6;
++        float xmin = 1e30f, ymin = 1e30f, xmax = -1e30f, ymax = -1e30f;
++        fprintf(stderr, "GUA-VERTEX-TRACE program=18 count=%d index_type=%s vp=%p cp=%p stride=%d/%d len=%u\\n", count, sindices ? "ushort" : "uint", vp->pointer, cp->pointer, vp->stride, cp->stride, len);
++        for (unsigned j=0; j<n; ++j) {
++            unsigned idx = sindices ? sindices[j] : (iindices ? iindices[j] : j);
++            if (idx >= len) { fprintf(stderr, "GUA-VERTEX-SKIP idx=%u out_of_range len=%u\\n", idx, len); continue; }
++            const unsigned char *pp = (const unsigned char*)vp->pointer + (size_t)idx * (vp->stride ? vp->stride : vp->size * sizeof(float));
++            const unsigned char *cc = (const unsigned char*)cp->pointer + (size_t)idx * (cp->stride ? cp->stride : 4);
++            const float *pf = (const float*)pp;
++            const unsigned char *cb = cc;
++            if (pf[0] < xmin) xmin=pf[0]; if (pf[0] > xmax) xmax=pf[0];
++            if (pf[1] < ymin) ymin=pf[1]; if (pf[1] > ymax) ymax=pf[1];
++            fprintf(stderr, "GUA-VERTEX idx=%u pos=(%.9g,%.9g,%.9g,%.9g) color=(%u,%u,%u,%u)\\n", idx, pf[0], pf[1], pf[2], pf[3], cb[0], cb[1], cb[2], cb[3]);
++        }
++        fprintf(stderr, "GUA-DRAW-COVERAGE program=18 ndc_bbox=(%.9g,%.9g)-(%.9g,%.9g)\\n", xmin, ymin, xmax, ymax);
++        gua_scene_vertex_dump = 1;
++    } else if (getenv("GUA_VERTEX_TRACE") && gua_scene_vertex_dump == 0 && glstate->glsl && glstate->glsl->program == 18) {
++        fprintf(stderr, "GUA-VERTEX-SKIP program=18 unsafe_or_nonclient_arrays\\n");
++        gua_scene_vertex_dump = 1;
++    }
+     if (glstate->raster.bm_drawing)
+         bitmap_flush();
+     DBG(printf("glDrawElementsCommon(%s, %d, %d, %d, %p, %p, %d)\n", PrintEnum(mode), first, count, len, sindices, iindices, instancecount);)
+@@ -354,6 +395,7 @@ if(count>500000) return;
+         count = ilen;
+     }
+     // of course, GL_SELECT with shader will just not work if not using standard transformation method... Instance count is ignored also
++    LOAD_GLES2(glGetError);
+     if (glstate->render_mode == GL_SELECT) {
+         // TODO handling uint indices
+         if(!sindices && !iindices)
+@@ -362,8 +404,18 @@ if(count>500000) return;
+             select_glDrawElements(&glstate->vao->vertexattrib[ATT_VERTEX], mode, count, sindices?GL_UNSIGNED_SHORT:GL_UNSIGNED_INT, sindices?((void*)sindices):((void*)iindices));
+     } else {
+         GLuint old_tex = glstate->texture.client;
+-        
++        int gua_p2_segment = getenv("GUA_P2_SEGMENT_WINDOW") && glstate->glsl && glstate->glsl->program == 2;
++        if (gua_p2_segment) {
++            LOAD_GLES2(glGetError);
++            GLenum gua_seg_pre = 0; unsigned gua_seg_n = 0;
++            do { gua_seg_pre = gles_glGetError ? gles_glGetError() : 0xffff; if (gua_seg_pre != GL_NO_ERROR) fprintf(stderr, "P2_SEG_PRE_REALIZE_ERROR n=%u error=0x%x\\n", ++gua_seg_n, gua_seg_pre); } while (gua_seg_pre != GL_NO_ERROR && gua_seg_n < 16);
++            fprintf(stderr, "P2_SEG_PRE_REALIZE_CLEAN=%d errors=%u\\n", gua_seg_pre == GL_NO_ERROR, gua_seg_n);
++        }
+         realize_textures(1);
++        if (gua_p2_segment) {
++            GLenum gua_seg_post = gles_glGetError ? gles_glGetError() : 0xffff;
++            fprintf(stderr, "P2_SEG_POST_REALIZE_ERROR=0x%x\\n", gua_seg_post);
++        }
+         if(hardext.esversion==1) {
+ 
+             #define TEXTURE(A) gl4es_glClientActiveTexture(A+GL_TEXTURE0);
+@@ -423,11 +475,39 @@ if(count>500000) return;
+         }
+ 
+         // POLYGON mode as LINE is "intercepted" and drawn using list
++        LOAD_GLES2(glGetError);
+         if(instancecount==1 || hardext.esversion==1) {
++            if (getenv("GUA_TEXTURE_GENERATION_TRACE") && glstate->glsl && glstate->glsl->program == 86) {
++                for (int gua_u=0; gua_u<3; ++gua_u) {
++                    gltexture_t *gua_st = glstate->texture.bound[gua_u][ENABLED_TEX2D];
++                    gua_tex_diag_sample(gua_st, glstate->glsl->program, 0, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0, gua_u);
++                }
++            }
++            if (getenv("GUA_ENABLE_PIXEL_TRANSITION_TRACE") && glstate->glsl && (glstate->glsl->program == 2 || glstate->glsl->program == 18 || glstate->glsl->program == 86))
++                gua_pixel_trace("PIXEL_BEFORE_DRAW");
++            static int gua_p2_window_done;
++            int gua_p2_window = getenv("GUA_P2_NATIVE_DRAW_WINDOW") && !gua_p2_window_done && glstate->glsl && glstate->glsl->program == 2 && !iindices && !sindices;
++            if (gua_p2_window) {
++                LOAD_GLES2(glGetError);
++                GLenum gua_pre = 0; unsigned gua_n = 0;
++                do { gua_pre = gles_glGetError ? gles_glGetError() : 0xffff; if (gua_pre != GL_NO_ERROR) fprintf(stderr, "P2_DRAW_PRE_EXISTING_ERROR n=%u error=0x%x\\n", ++gua_n, gua_pre); } while (gua_pre != GL_NO_ERROR && gua_n < 16);
++                fprintf(stderr, "P2_DRAW_PRE_CLEAN=%d errors=%u\\n", gua_pre == GL_NO_ERROR, gua_n);
++            }
+             if(!iindices && !sindices)
+                 gles_glDrawArrays(mode, first, count);
+             else
+                 gles_glDrawElements(mode, count, (sindices)?GL_UNSIGNED_SHORT:GL_UNSIGNED_INT, (sindices?((void*)sindices):((void*)iindices)));
++            if (gua_p2_window) {
++                GLenum gua_post = gles_glGetError ? gles_glGetError() : 0xffff;
++                fprintf(stderr, "P2_DRAW_POST_ERROR=0x%x\\n", gua_post);
++                gua_p2_window_done = 1;
++            }
++            gua_pixel_trace("PIXEL_AFTER_DRAW");
++            if (getenv("GUA_DRAW_ERROR_WINDOW") && glstate->glsl && (glstate->glsl->program == 2 || glstate->glsl->program == 22)) {
++                LOAD_GLES2(glGetError);
++                GLenum gua_draw_error = gles_glGetError ? gles_glGetError() : 0xffff;
++                fprintf(stderr, "GUA-DRAW-IMMEDIATE-ERROR program=%u api=%s error=0x%x\\n", glstate->glsl->program, (!iindices && !sindices) ? "glDrawArrays" : "glDrawElements", gua_draw_error);
++            }
+         } else {
+             if(!iindices && !sindices)
+                 fpe_glDrawArraysInstanced(mode, first, count,instancecount);
+@@ -455,7 +535,8 @@ if(count>500000) return;
+ #define MAX_BATCH  globals4es.maxbatch
+ 
+ void APIENTRY_GL4ES gl4es_glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
+-    DBG(printf("glDrawRangeElements(%s, %i, %i, %i, %s, @%p), inlist=%i, pending=%d\n", PrintEnum(mode), start, end, count, PrintEnum(type), indices, (glstate->list.active)?1:0, glstate->list.pending);)
++    GUA_DRAW_TRACE("RANGE mode=0x%x start=%u end=%u count=%d type=0x%x logical_fbo=%u", mode, start, end, count, type, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
++    DBG(printf("glDrawRangeElements(%s, %i, %i, %i, %s, @%p), inlist=%i, pending=%d\\n", PrintEnum(mode), start, end, count, PrintEnum(type), indices, (glstate->list.active)?1:0, glstate->list.pending);)
+     count = adjust_vertices(mode, count);
+     
+     if (count<0) {
+@@ -559,7 +640,8 @@ AliasExport(void,glDrawRangeElements,EXT,(GLenum mode,GLuint start,GLuint end,GL
+ 
+ 
+ void APIENTRY_GL4ES gl4es_glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices) {
+-    DBG(printf("glDrawElements(%s, %d, %s, %p), vtx=%p map=%p, pending=%d\n", PrintEnum(mode), count, PrintEnum(type), indices, (glstate->vao->vertex)?glstate->vao->vertex->data:NULL, (glstate->vao->elements)?glstate->vao->elements->data:NULL, glstate->list.pending);)
++    GUA_DRAW_TRACE("ELEMENTS mode=0x%x count=%d type=0x%x logical_fbo=%u", mode, count, type, glstate->fbo.current_fb ? glstate->fbo.current_fb->id : 0);
++    DBG(printf("glDrawElements(%s, %d, %s, %p), vtx=%p map=%p, pending=%d\\n", PrintEnum(mode), count, PrintEnum(type), indices, (glstate->vao->vertex)?glstate->vao->vertex->data:NULL, (glstate->vao->elements)?glstate->vao->elements->data:NULL, glstate->list.pending);)
+     // TODO: split for count > 65535?
+     // special check for QUADS and TRIANGLES that need multiple of 4 or 3 vertex...
+     count = adjust_vertices(mode, count);
+diff --git a/src/gl/texture_params.c b/src/gl/texture_params.c
+index 96e0720..69e5afa 100644
+--- a/src/gl/texture_params.c
++++ b/src/gl/texture_params.c
+@@ -1,5 +1,16 @@
+-#include "texture.h"
++#include <stdio.h>
++static unsigned gua_tex_bind_trace;
++static unsigned gua_tex_lookup_events;
++#define GUA_TEX_BIND_TRACE(fmt, ...) do { \
++    if (gua_tex_bind_trace < 512) \
++        fprintf(stderr, "GUA-TEX-BIND n=%u " fmt "\\n", ++gua_tex_bind_trace, ##__VA_ARGS__); \
++} while (0)
++#define GUA_TEX_LOOKUP(fmt, ...) do { \
++    if (gua_tex_lookup_events < 128) \
++        fprintf(stderr, "GUA-TEX-LOOKUP n=%u " fmt "\n", ++gua_tex_lookup_events, ##__VA_ARGS__); \
++} while (0)
+ 
++#include "texture.h"
+ #include "../glx/hardext.h"
+ #include "../glx/streaming.h"
+ #include "array.h"
+@@ -16,8 +27,57 @@
+ #include "pixel.h"
+ #include "raster.h"
+ 
++void gua_p2_checkpoint(const char *tag) {
++    if (!getenv("GUA_P2_CALL_CHAIN_WINDOW") || !glstate || !glstate->glsl || glstate->glsl->program != 2) return;
++    LOAD_GLES(glGetError);
++    GLenum e=0; unsigned n=0;
++    do { e=gles_glGetError ? gles_glGetError() : 0xffff; if(e!=GL_NO_ERROR) fprintf(stderr,"P2_CALL_%s_PRE_ERROR n=%u error=0x%x\\n",tag,++n,e); } while(e!=GL_NO_ERROR && n<16);
++    fprintf(stderr,"P2_CALL_%s_CLEAN=%d errors=%u\\n",tag,e==GL_NO_ERROR,n);
++}
++
+ KHASH_MAP_IMPL_INT(tex, gltexture_t *);
+ 
++
++typedef struct {
++    gltexture_t *ptr;
++    unsigned generation;
++    GLuint logical_id, native_glname;
++    unsigned create_seq, delete_seq, last_storage_seq, last_writer_seq;
++    unsigned last_writer_program, last_writer_program_generation, last_writer_fbo;
++    int alive, width, height;
++    GLenum format, type, internalformat;
++    const char *last_writer_kind;
++} gua_tex_diag_t;
++static gua_tex_diag_t gua_tex_diag[512];
++static unsigned gua_tex_diag_count, gua_tex_diag_seq;
++static int gua_tex_trace_on(void) { return getenv("GUA_TEXTURE_GENERATION_TRACE") != NULL; }
++static gua_tex_diag_t *gua_tex_diag_find(gltexture_t *tex) {
++    for (unsigned i=0; i<gua_tex_diag_count; ++i) if (gua_tex_diag[i].ptr == tex) return &gua_tex_diag[i];
++    return NULL;
++}
++static gua_tex_diag_t *gua_tex_diag_record(gltexture_t *tex, const char *source) {
++    if (!gua_tex_trace_on() || !tex) return NULL;
++    gua_tex_diag_t *d = gua_tex_diag_find(tex);
++    if (d) return d;
++    if (gua_tex_diag_count >= 512) return NULL;
++    unsigned gen = 1;
++    for (unsigned i=0; i<gua_tex_diag_count; ++i)
++        if (gua_tex_diag[i].logical_id == tex->texture && gua_tex_diag[i].generation >= gen) gen = gua_tex_diag[i].generation + 1;
++    d = &gua_tex_diag[gua_tex_diag_count++];
++    memset(d, 0, sizeof(*d)); d->ptr=tex; d->generation=gen; d->logical_id=tex->texture; d->native_glname=tex->glname; d->alive=1;
++    d->create_seq=++gua_tex_diag_seq;
++    fprintf(stderr, "GUA-TEX-CREATE seq=%u source=%s logical=%u gen=%u ptr=%p glname=%u\\n", d->create_seq, source, d->logical_id, d->generation, (void*)tex, d->native_glname);
++    return d;
++}
++void gua_tex_diag_storage(gltexture_t *tex, GLint level, GLsizei width, GLsizei height, GLint internalformat, GLenum format, GLenum type, const void *data) {
++    gua_tex_diag_t *d=gua_tex_diag_record(tex, "STORAGE"); if (!d) return; d->last_storage_seq=++gua_tex_diag_seq; d->width=width; d->height=height; d->internalformat=internalformat; d->format=format; d->type=type; if(data) d->last_writer_seq=d->last_storage_seq;
++    fprintf(stderr, "GUA-TEX-STORAGE seq=%u api=TexImage2D logical=%u gen=%u ptr=%p glname=%u level=%d size=%dx%d internal=0x%x format=0x%x type=0x%x data=%s\\n", d->last_storage_seq,d->logical_id,d->generation,(void*)tex,d->native_glname,level,width,height,internalformat,format,type,data?"NONNULL":"NULL");
++}
++void gua_tex_diag_delete(gltexture_t *tex) { gua_tex_diag_t *d=gua_tex_diag_find(tex); if(!d || !gua_tex_trace_on()) return; d->delete_seq=++gua_tex_diag_seq; d->alive=0; fprintf(stderr,"GUA-TEX-DELETE seq=%u logical=%u gen=%u ptr=%p glname=%u\\n",d->delete_seq,d->logical_id,d->generation,(void*)tex,d->native_glname); }
++void gua_tex_diag_sample(gltexture_t *tex, GLuint program, unsigned pgen, unsigned fbo, int unit) { gua_tex_diag_t *d=gua_tex_diag_record(tex,"SAMPLE"); if(!d)return; fprintf(stderr,"GUA-SAMPLE-PROVENANCE seq=%u program=%u pgen=%u unit=%d logical=%u gen=%u ptr=%p glname=%u shadow_actual_tex2d=%u alive=%d last_writer=%s last_writer_seq=%u writer_fbo=%u\\n",++gua_tex_diag_seq,program,pgen,unit,d->logical_id,d->generation,(void*)tex,d->native_glname,glstate->actual_tex2d[unit],d->alive,d->last_writer_kind?d->last_writer_kind:"NONE",d->last_writer_seq,d->last_writer_fbo); }
++void gua_tex_diag_writer(gltexture_t *tex, const char *kind, GLuint program, unsigned pgen, unsigned fbo) { gua_tex_diag_t *d=gua_tex_diag_find(tex); if(!d || !gua_tex_trace_on())return; d->last_writer_seq=++gua_tex_diag_seq; d->last_writer_program=program; d->last_writer_program_generation=pgen; d->last_writer_fbo=fbo; d->last_writer_kind=kind; fprintf(stderr,"GUA-TEX-WRITER seq=%u kind=%s logical=%u gen=%u ptr=%p glname=%u fbo=%u program=%u pgen=%u\\n",d->last_writer_seq,kind,d->logical_id,d->generation,(void*)tex,d->native_glname,fbo,program,pgen); }
++
++
+ //#define DEBUG
+ #ifdef DEBUG
+ #define DBG(a) a
+@@ -137,23 +197,30 @@ gltexture_t* gl4es_getCurrentTexture(GLenum target) {
+     return glstate->texture.bound[glstate->texture.active][itarget];
+ }
+ gltexture_t* gl4es_getTexture(GLenum target, GLuint texture) {
++    GUA_TEX_LOOKUP("ENTRY target=0x%x guest=%u", target, texture);
+     // Get a texture based on glID
+     gltexture_t* tex = NULL;
+     if (texture == 0) return glstate->texture.zero; // texture 0 is a texture mostly like any other... it is not "unbind" texture in fact, but it's not shared
+     int ret;
+     khint_t k;
+     khash_t(tex) *list = glstate->texture.list;
++    GUA_TEX_LOOKUP("BEFORE_KH_GET guest=%u list=%p", texture, (void*)list);
+     k = kh_get(tex, list, texture);
++    GUA_TEX_LOOKUP("AFTER_KH_GET guest=%u k=%u end=%u", texture, (unsigned)k, (unsigned)kh_end(list));
+     
+     if (k == kh_end(list)){
++        GUA_TEX_LOOKUP("BEFORE_LOAD_GEN guest=%u", texture);
+         LOAD_GLES(glGenTextures);
++        GUA_TEX_LOOKUP("AFTER_LOAD_GEN guest=%u", texture);
+         k = kh_put(tex, list, texture, &ret);
+         tex = kh_value(list, k) = malloc(sizeof(gltexture_t));
+         memset(tex, 0, sizeof(gltexture_t));
+         tex->texture = texture;
+-        if (texture)
++        if (texture) {
++            GUA_TEX_LOOKUP("BEFORE_NATIVE_GEN guest=%u", texture);
+             gles_glGenTextures(1, &tex->glname);
+-        else
++            GUA_TEX_LOOKUP("AFTER_NATIVE_GEN guest=%u native=%u", texture, tex->glname);
++        } else
+             tex->glname = 0;    // special case for texture n# 0
+         DBG(printf("getTexture(%s, %u), failed, creating texture %u\n", PrintEnum(target), texture, tex->glname);)
+         tex->target = target;
+@@ -170,6 +237,7 @@ gltexture_t* gl4es_getTexture(GLenum target, GLuint texture) {
+         tex->type = GL_UNSIGNED_BYTE;
+         tex->inter_format = GL_RGBA;
+         tex->inter_type = GL_UNSIGNED_BYTE;
++        gua_tex_diag_record(tex, "LAZY_GET");
+     } else {
+         tex = kh_value(list, k);
+     }
+@@ -188,12 +256,14 @@ void APIENTRY_GL4ES gl4es_glBindTexture(GLenum target, GLuint texture) {
+         const GLuint itarget = what_target(target);
+ 
+         tex = gl4es_getTexture(target, texture);
++        GUA_TEX_BIND_TRACE("program=%u active=%d target=0x%x guest=%u native=%u bound_changed=%d fpe_bound_changed=%d", glstate->glsl ? glstate->glsl->program : 0, glstate->texture.active, target, texture, tex ? tex->glname : 0, glstate->bound_changed, glstate->fpe_bound_changed);
+         if (glstate->texture.bound[glstate->texture.active][itarget] == tex)
+             return;
+         
+         FLUSH_BEGINEND;
+         tex_changed = glstate->texture.active+1;
+         glstate->texture.bound[glstate->texture.active][itarget] = tex;
++        GUA_TEX_BIND_TRACE("STATE program=%u active=%d guest=%u native=%u", glstate->glsl ? glstate->glsl->program : 0, glstate->texture.active, texture, tex ? tex->glname : 0);
+ 
+         LOAD_GLES(glBindTexture);
+         switch(target) {
+@@ -397,6 +467,7 @@ void APIENTRY_GL4ES gl4es_glDeleteTextures(GLsizei n, const GLuint *textures) {
+                     if(found)
+                         glstate->bound_changed = a+1;
+                 }
++                gua_tex_diag_delete(tex);
+                 gles_glDeleteTextures(1, &tex->glname);
+                 // check if renderbuffer where associeted
+                 if(tex->binded_fbo) {
+@@ -462,6 +533,7 @@ void APIENTRY_GL4ES gl4es_glGenTextures(GLsizei n, GLuint * textures) {
+             tex->type = GL_UNSIGNED_BYTE;
+             tex->inter_format = GL_RGBA;
+             tex->inter_type = GL_UNSIGNED_BYTE;
++            gua_tex_diag_record(tex, "GEN");
+         } else {
+             tex = kh_value(list, k);
+             // in case of no delete here...
+@@ -601,6 +673,7 @@ void APIENTRY_GL4ES gl4es_glGetTexLevelParameterfv(GLenum target, GLint level, G
+ void APIENTRY_GL4ES gl4es_glActiveTexture( GLenum texture ) {
+     DBG(printf("glActiveTexture(%s)\n", PrintEnum(texture));)
+     int tmu = texture - GL_TEXTURE0;
++    GUA_TEX_BIND_TRACE("ACTIVE program=%u requested=0x%x tmu=%d before=%d pending=%d active_list=%d", glstate->glsl ? glstate->glsl->program : 0, texture, tmu, glstate->texture.active, glstate->list.pending, glstate->list.active != NULL);
+     if (glstate->list.pending) {
+  /*       if(glstate->texture.active == tmu) {
+             noerrorShim();
+@@ -877,6 +950,7 @@ void realize_textures(int drawing) {
+         GLenum target = map_tex_target(to_target(tgt));
+         gltexture_t *tex = glstate->texture.bound[i][tgt];
+         GLuint t = tex->glname;
++        GUA_TEX_BIND_TRACE("REALIZE program=%u drawing=%d i=%d active=%d tgt=0x%x guest=%u native=%u actual=%u bound_changed=%d", glstate->glsl ? glstate->glsl->program : 0, drawing, i, glstate->texture.active, target, tex->texture, t, glstate->actual_tex2d[i], glstate->bound_changed);
+         if(tgt!=ENABLED_CUBE_MAP) {// CUBE MAP are immediately bound
+ #ifdef TEXSTREAM
+             if(glstate->bound_stream[i]) {
+@@ -893,7 +967,9 @@ void realize_textures(int drawing) {
+             ) {
+                 if(glstate->gleshard->active!=i) {
+                     glstate->gleshard->active = i;
++                    gua_p2_checkpoint("BEFORE_ACTIVE_TEXTURE");
+                     gles_glActiveTexture(GL_TEXTURE0+i);
++                    gua_p2_checkpoint("AFTER_ACTIVE_TEXTURE");
+                 }
+ #ifdef TEXSTREAM
+                 int streamed = tex->streamed;
+@@ -918,8 +994,11 @@ void realize_textures(int drawing) {
+ #endif
+ 
+                 // bound...
++                GUA_TEX_BIND_TRACE("NATIVE program=%u i=%d guest=%u native=%u", glstate->glsl ? glstate->glsl->program : 0, i, tex->texture, t);
+                 DBG(printf("Binding %s/%s[%d]:Texture[%u] (sampler[%d]=%p)\n", PrintEnum(to_target(tgt)), PrintEnum(target), i, t, i, glstate->samplers.sampler[i]);)
++                gua_p2_checkpoint("BEFORE_BIND_TEXTURE");
+                 gles_glBindTexture(GL_TEXTURE_2D, t);
++                gua_p2_checkpoint("AFTER_BIND_TEXTURE");
+                 glstate->actual_tex2d[i] = t;
+             }
+         }
+@@ -939,6 +1018,7 @@ void realize_textures(int drawing) {
+             }
+         }
+         realize_1texture(target, i, tex, glstate->samplers.sampler[i]);
++        gua_p2_checkpoint("AFTER_REALIZE_1TEXTURE");
+     }
+     glstate->bound_changed = 0;
+ }
+diff --git a/src/gl/fpe.c b/src/gl/fpe.c
+index 7d53643..f765d17 100644
+--- a/src/gl/fpe.c
++++ b/src/gl/fpe.c
+@@ -9,6 +9,7 @@
+ #include "matrix.h"
+ #include "matvec.h"
+ #include "program.h"
++#include "texture.h"
+ #include "shaderconv.h"
+ 
+ #include "fpe.h"
+@@ -1112,13 +1113,18 @@ void realize_glenv(int ispoint, int first, int count, GLenum type, const void* i
+             glstate->gleshard->program = program;
+             glstate->gleshard->glprogram = glprogram;
+             if (gl4es_glIsProgram(glstate->gleshard->program)) {
++              gua_p2_checkpoint("BEFORE_FPE_USE_PROGRAM");
+               gles_glUseProgram(glstate->gleshard->program);
++              gua_p2_checkpoint("AFTER_FPE_USE_PROGRAM");
+               DBG(printf("Use GLSL program %d\n", glstate->gleshard->program);)
+             }
+         }
+         // synchronize uniforms with parent!
+-        if(glprogram != glstate->glsl->glprogram)
++        if(glprogram != glstate->glsl->glprogram) {
++            gua_p2_checkpoint("BEFORE_FPE_SYNC_UNIFORMS");
+             fpe_SyncUniforms(&glstate->glsl->glprogram->cache, glprogram);
++            gua_p2_checkpoint("AFTER_FPE_SYNC_UNIFORMS");
++        }
+     } else {
+         fpe_program(ispoint);
+         if(glstate->gleshard->program != glstate->fpe->prog)
+@@ -1165,6 +1171,7 @@ void realize_glenv(int ispoint, int first, int count, GLenum type, const void* i
+         }
+     }
+     // setup fixed pipeline builtin matrix uniform if needed
++    gua_p2_checkpoint("BEFORE_BUILTIN_MATRIX");
+     if(glprogram->has_builtin_matrix)
+     {
+         if(glprogram->builtin_matrix[MAT_MVP]!=-1 || glprogram->builtin_matrix[MAT_MVP_I]!=-1
+@@ -1238,6 +1245,7 @@ void realize_glenv(int ispoint, int first, int count, GLenum type, const void* i
+             }
+         }
+     }
++    gua_p2_checkpoint("AFTER_BUILTIN_MATRIX");
+     // set light and material if needed
+     if(glprogram->has_builtin_light)
+     {
+@@ -1447,11 +1455,16 @@ void realize_glenv(int ispoint, int first, int count, GLenum type, const void* i
+         if(v->enabled != enabled || (v->enabled && w->divisor)) {
+             dirty = 1;
+             v->enabled = (w->divisor)?0:enabled;
+-            DBG(printf("VertexAttribArray[%d]:%s, divisor=%d\n", i, (enabled)?"Enable":"Disable", w->divisor);)
+-            if(v->enabled)
++            DBG(printf("VertexAttribArray[%d]:%s, divisor=%d\n", i, (enabled)?"Enable":"Disable", w->divisor););
++            if(v->enabled) {
++                gua_p2_checkpoint("BEFORE_ENABLE_VERTEX_ATTRIB_ARRAY");
+                 gles_glEnableVertexAttribArray(i);
+-            else
++                gua_p2_checkpoint("AFTER_ENABLE_VERTEX_ATTRIB_ARRAY");
++            } else {
++                gua_p2_checkpoint("BEFORE_DISABLE_VERTEX_ATTRIB_ARRAY");
+                 gles_glDisableVertexAttribArray(i);
++                gua_p2_checkpoint("AFTER_DISABLE_VERTEX_ATTRIB_ARRAY");
++            }
+         }
+         // check if new value has to be sent to hardware
+         if(v->enabled) {
+@@ -1503,7 +1516,9 @@ void realize_glenv(int ispoint, int first, int count, GLenum type, const void* i
+                     v->buffer = w->buffer; // buffer is unused here
+                 }
+                 DBG(printf("using Buffer %d\n", v->real_buffer);)
++                gua_p2_checkpoint("BEFORE_BIND_ARRAY_BUFFER");
+                 bindBuffer(GL_ARRAY_BUFFER, v->real_buffer);
++                gua_p2_checkpoint("AFTER_BIND_ARRAY_BUFFER");
+ 
+                 if (v->integer) {
+                     if(gles_glVertexAttribIPointer)
+@@ -1513,7 +1528,9 @@ void realize_glenv(int ispoint, int first, int count, GLenum type, const void* i
+                     DBG(printf("glVertexAttribIPointer(%d, %d, %s, %d, %p)\n", i, v->size, PrintEnum(v->type), v->stride, v->pointer);)
+                 }
+                 else {
++                    gua_p2_checkpoint("BEFORE_VERTEX_ATTRIB_POINTER");
+                     gles_glVertexAttribPointer(i, v->size, v->type, v->normalized, v->stride, v->pointer);
++                    gua_p2_checkpoint("AFTER_VERTEX_ATTRIB_POINTER");
+                     DBG(printf("glVertexAttribPointer(%d, %d, %s, %d, %d, %p)\n", i, v->size, PrintEnum(v->type), v->normalized, v->stride, v->pointer);)
+                 }
+             }
+@@ -1550,7 +1567,9 @@ void realize_glenv(int ispoint, int first, int count, GLenum type, const void* i
+             }
+             if(dirty || memcmp(glstate->gleshard->vavalue[i], current, 4*sizeof(GLfloat))) {
+                 memcpy(glstate->gleshard->vavalue[i], current, 4*sizeof(GLfloat));
++                gua_p2_checkpoint("BEFORE_VERTEX_ATTRIB_4FV");
+                 gles_glVertexAttrib4fv(i, glstate->gleshard->vavalue[i]);
++                gua_p2_checkpoint("AFTER_VERTEX_ATTRIB_4FV");
+                 DBG(printf("glVertexAttrib4fv(%d, %p) => (%f, %f, %f, %f)\n", i, glstate->gleshard->vavalue[i], glstate->gleshard->vavalue[i][0], glstate->gleshard->vavalue[i][1], glstate->gleshard->vavalue[i][2], glstate->gleshard->vavalue[i][3]);)
+             }
+         }
+@@ -1559,8 +1578,10 @@ void realize_glenv(int ispoint, int first, int count, GLenum type, const void* i
+         vertexattrib_t *v = &glstate->gleshard->vertexattrib[i];
+         if(v->enabled) {
+             v->enabled = 0;
+-            DBG(printf("VertexAttribArray[%d]:%s\n", i, "Disable");)
++            DBG(printf("VertexAttribArray[%d]:%s\\n", i, "Disable");)
++            gua_p2_checkpoint("BEFORE_DISABLE_VERTEX_ATTRIB_ARRAY");
+             gles_glDisableVertexAttribArray(i);
++            gua_p2_checkpoint("AFTER_DISABLE_VERTEX_ATTRIB_ARRAY");
+         }
+     }
+ }
+diff --git a/src/gl/texture.h b/src/gl/texture.h
+index 33e140a..710efbb 100644
+--- a/src/gl/texture.h
++++ b/src/gl/texture.h
+@@ -177,6 +177,11 @@ static inline GLenum map_tex_target(GLenum target) {
+ }
+ gltexture_t* gl4es_getTexture(GLenum target, GLuint texture);
+ gltexture_t* gl4es_getCurrentTexture(GLenum target);
++void gua_tex_diag_storage(gltexture_t*, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*);
++void gua_tex_diag_delete(gltexture_t*);
++void gua_tex_diag_sample(gltexture_t*, GLuint, unsigned, unsigned, int);
++void gua_tex_diag_writer(gltexture_t*, const char*, GLuint, unsigned, unsigned);
++void gua_p2_checkpoint(const char*);
+ 
+ static inline GLuint what_target(GLenum target) {
+     switch(target) {

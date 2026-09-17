@@ -1,0 +1,90 @@
+# Guacamelee original-layout asset-loader A/B
+
+Date: 2026-09-16
+Device: TSPS / Longan
+
+## Baseline hashes
+
+```text
+original gamedata/game-bin:
+cfab463cab9f734588bae0a9c102be89699c747ed0e51235e384eb02cff08d6b
+
+private historical NOP copy:
+5aa2a2cc89d79912a4036ce5aca344fa6cc6f8767e346b8d271c3b76300aa063
+```
+
+The paid original binary was not modified. The old private NOP copy remains only as a historical device artifact and is not included in the current ZIP.
+
+## A/B 2.2 — original binary, original asset directory, sched shim only
+
+```text
+cwd: /mnt/SDCARD/Data/ports/guacamelee/gamedata
+binary: ./game-bin through Box64/Box32
+preload: libbox32_schedshim.so only
+```
+
+The first attempt accidentally invoked `./game-bin` directly and returned `cannot execute binary file`; it was discarded as a launcher invocation error, not game evidence.
+
+The corrected run used the validated Box64 executable and stayed alive through thread/archive initialization. Raw log:
+
+```text
+asset-ab-original2.log
+size 65151833 bytes
+SHA-256 c15f71f0e8735f3ef4f502fef6d074c2f55fad0627fa2d23ddff9dc5192bd08a
+```
+
+## A/B 2.3 — original binary, original asset directory, both runtime shims
+
+```text
+cwd: /mnt/SDCARD/Data/ports/guacamelee/gamedata
+binary: ./game-bin through Box64/Box32
+preload: affinity shim + sched shim
+LIBGL_FB unset
+LIBGL_SHRINK unset
+LIBGL_FBOFORCETEX=0
+```
+
+Raw log:
+
+```text
+asset-ab-original-shims.log
+size 228274861 bytes
+SHA-256 543d53b448a3e9e79162cbe3b28569df5d048f36aa1d7eb0e7c491b43b33ea56
+```
+
+Observed:
+
+```text
+fopen64("misc.dat") -> non-null
+fopen64("levels.dat") -> non-null
+fopen64("resources.dat") -> non-null
+fopen64("shaders.dat.ogl") -> non-null
+SDL_GL_CreateContext -> non-null
+DoUpdateConstants for shader .\\Shaders\\vs_2d_main.vsh:main
+DoUpdateConstants for shader .\\Shaders\\vs_2d_main_plain.vsh:main
+FMOD audio drivers (39)
+FMOD init succeeded with driver 1
+```
+
+The previous failure is absent:
+
+```text
+no fopen64(".\\Shaders\\vs_2d_main.vsh") -> ENOENT
+no GetVertexShader(...) -> false
+no fclose(NULL)
+no SIGSEGV
+```
+
+## Result
+
+PASS. Keeping the original binary in the same `gamedata/` directory as `shaders.dat.ogl` restores the normal Linux asset-base semantics. The old `box32-direct/game-bin` path was an invalid layout for this title and must not be used.
+
+The current shipping experimental launcher already uses:
+
+```text
+DATADIR=$GAMEDIR/gamedata
+GAME=$DATADIR/game-bin
+cd $DATADIR
+```
+
+The next blocker is therefore no longer shader asset lookup. It remains the later FBO/render/presentation transition, with native FBO controls complete, real gl4es draw events proven, and exact SDL swap invocation still unproven.

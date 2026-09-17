@@ -1,0 +1,48 @@
+# FBO1 writer and guest intent — completed first-cycle trace
+
+Raw trace:
+  /mnt/external/Hermes/guac-writer-runtime.log
+  SHA-256=699d33ad70bc10cc133f8b6023ca7547e6b3d4b18bae53434ac6806c0c8fec3c
+
+First resolve cycle ordered evidence:
+
+```text
+seq=38 guest bind GL_FRAMEBUFFER requested=1; logical/native current=1
+seq=40 guest clear-color on FBO1 rgba=0,0,0,1
+seq=41 guest bind GL_READ_FRAMEBUFFER requested=1; logical read=1
+seq=42 guest bind GL_DRAW_FRAMEBUFFER requested=2; logical draw=2/native=2
+seq=44 ReadDraw_Push read-side
+seq=46 ReadDraw_Pop
+seq=47 BLIT read=1 draw=2
+```
+
+At seq=40 the first observed FBO1 content writer is the application clear. It
+writes black, not scene pixels. No selected scene draw occurs while FBO1 is the
+current/draw framebuffer. After resolve, the guest binds framebuffer 0 and scene
+program2/program22/program86 draws run with logical/native FBO0.
+
+Classification:
+
+```text
+FBO1_FIRST_WRITER=seq40/glClearColor+glClear (black clear)
+FBO1_LAST_WRITER_BEFORE_RESOLVE=seq40/glClearColor+glClear
+FBO1_WRITTEN_SINCE_CREATE=1
+FBO1_WRITTEN_THIS_FRAME=1 (clear only)
+GUEST_INTENDS_SCENE_DRAW_FBO1=NO
+GL4ES_LOSES_FBO1_DRAW_INTENT=NO
+FBO1_EXPECTED_NON_DRAW_POPULATION=YES (it is selected as READ source)
+FBO1_NONBLACK_WRITER=NONE_OBSERVED
+```
+
+The guest bind intent is preserved. The sequence is not a lost DRAW target:
+FBO1 is bound, cleared, then explicitly selected as READ source. A global remap
+or local lost-DRAW-target patch is therefore not justified.
+
+The evidence does not prove whether the application intended FBO1 to be only a
+black initialization/resolve source or whether a missing copy/resolve operation
+should have populated it. It does prove that no non-black FBO1 writer appears in
+the observed first resolve cycle.
+
+The trace includes existing bounded pipeline/bind/draw markers and corrected
+pixel fields. It is not used for native 0x502 attribution because pixel tracing
+contains readback/state queries.

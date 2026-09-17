@@ -1,0 +1,61 @@
+diff --git a/src/libtools/threads32.c b/src/libtools/threads32.c
+index aaa04d5..27bf0e2 100755
+--- a/src/libtools/threads32.c
++++ b/src/libtools/threads32.c
+@@ -162,6 +162,9 @@ EXPORT int my32_pthread_attr_setstack(x64emu_t* emu, void* attr, void* stackaddr
+ 
+ EXPORT int my32_pthread_create(x64emu_t *emu, void* t, void* attr, void* start_routine, void* arg)
+ {
++    static uint32_t create_call;
++    uint32_t call = ++create_call;
++    printf_log(LOG_INFO, "AFFINITY_TRACE PTHREAD_CREATE_ENTER call=%u attr=%p start=%p arg=%p online_cpus=%ld\\n", call, attr, start_routine, arg, sysconf(_SC_NPROCESSORS_ONLN));
+     size_t stacksize = 2*1024*1024;    //default stack size is 2Mo
+     void* attr_stack;
+     size_t attr_stacksize;
+@@ -246,6 +249,8 @@ EXPORT int my32_pthread_create(x64emu_t *emu, void* t, void* attr, void* start_r
+     // create thread
+     int ret = pthread_create((pthread_t*)t, my_attr?my_attr:get_attr(attr), 
+         pthread_routine, et);
++    uint32_t guest_thread = (t && ret==0) ? *(uint32_t*)t : 0;
++    printf_log(LOG_INFO, "AFFINITY_TRACE PTHREAD_CREATE_EXIT call=%u rc=%d guest_thread=0x%08x\\n", call, ret, guest_thread);
+     if(my_attr) pthread_attr_destroy(my_attr);
+     return ret;
+ }
+@@ -877,6 +882,16 @@ EXPORT int my32_pthread_setaffinity_np(x64emu_t* emu, pthread_t thread, int cpus
+ 
+ EXPORT int my32_pthread_attr_setaffinity_np(x64emu_t* emu, void* attr, uint32_t cpusetsize, void* cpuset)
+ {
++    static uint32_t affinity_call;
++    uint32_t call = ++affinity_call;
++    printf_log(LOG_INFO, "AFFINITY_TRACE AFFINITY_ENTER call=%u guest_attr=%p cpuset=%p cpusetsize=%u\\n", call, attr, cpuset, cpusetsize);
++    if(cpuset && cpusetsize) {
++        uint32_t n = cpusetsize < 16 ? cpusetsize : 16;
++        char hex[16*3+1];
++        for(uint32_t i=0; i<n; ++i) snprintf(hex+i*3, 4, "%02x ", ((uint8_t*)cpuset)[i]);
++        hex[n*3] = '\0';
++        printf_log(LOG_INFO, "AFFINITY_TRACE AFFINITY_MASK call=%u first_bytes=%s\\n", call, hex);
++    }
+     if(cpusetsize>0x1000) {
+         // probably old version of the function, that didn't have cpusetsize....
+         cpuset = from_ptrv(cpusetsize);
+@@ -889,11 +904,18 @@ EXPORT int my32_pthread_attr_setaffinity_np(x64emu_t* emu, void* attr, uint32_t
+ 		cpumask_maxcpu(mask_, cpusetsize, BOX64ENV(maxcpu));
+ 		cpumask_shiftleft(mask_, cpusetsize, BOX64ENV(skipcpu));
+ 	}
+-    int ret = pthread_attr_setaffinity_np(get_attr(attr), cpusetsize, cpuset_);
+-    if(ret<0) {
++	pthread_attr_t* native_attr = get_attr(attr);
++	printf_log(LOG_INFO, "AFFINITY_TRACE AFFINITY_GET_ATTR call=%u native_attr=%p\\n", call, native_attr);
++	printf_log(LOG_INFO, "AFFINITY_TRACE AFFINITY_NATIVE_ENTER call=%u\\n", call);
++	errno = 0;
++	int ret = pthread_attr_setaffinity_np(native_attr, cpusetsize, cpuset_);
++	int saved_errno = errno;
++	printf_log(LOG_INFO, "AFFINITY_TRACE AFFINITY_NATIVE_EXIT call=%u rc=%d errno=%d\\n", call, ret, saved_errno);
++	if(ret<0) {
+         printf_log(LOG_INFO, "Warning, pthread_attr_setaffinity_np(%p, %d, %p) errored, with errno=%d\n", attr, cpusetsize, cpuset, errno);
+     }
+ 
++    printf_log(LOG_INFO, "AFFINITY_TRACE AFFINITY_EXIT call=%u rc=%d\\n", call, ret);
+     return ret;
+ }
+ EXPORT int my32_pthread_attr_getaffinity_np(x64emu_t* emu, void* attr, uint32_t cpusetsize, void* cpuset)

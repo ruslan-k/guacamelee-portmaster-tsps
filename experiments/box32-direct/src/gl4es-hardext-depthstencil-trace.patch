@@ -1,0 +1,15 @@
+diff --git a/src/glx/hardext.c b/src/glx/hardext.c
+index c89a123..eaac272 100644
+--- a/src/glx/hardext.c
++++ b/src/glx/hardext.c
+@@ -115,7 +115,9 @@ void GetHardwareExtensions(int notest)
+ #else
+             hardext.npot = 1;
+ #endif
+-            hardext.fbo = 1; 
++            hardext.fbo = 1;
++            hardext.depthstencil = 1;
++            SHUT_LOGD("GUA-HARDEXT notest=1 es=2 depthstencil=1\\n");
+             hardext.blendcolor = 1;
+             hardext.blendsub = 1;
+             hardext.blendfunc = 1;

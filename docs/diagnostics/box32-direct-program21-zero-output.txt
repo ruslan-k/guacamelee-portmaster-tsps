@@ -1,0 +1,125 @@
+# Program21 zero-output shader provenance
+
+## Diagnostic run
+
+The run used the corrected NOTEST hardext values and no `LIBGL_FB`, `LIBGL_FBOFORCETEX`, `LIBGL_SHRINK`, or X11 stub.
+
+Raw source-dump log:
+
+```text
+/mnt/external/Hermes/srcdump.log
+SHA-256=c9f52d4c60c1a206ba8d9caedf7b0ba3ca77b8824abd36c718e762c7cc4caea8
+```
+
+Uniform-all-families log:
+
+```text
+/mnt/external/Hermes/uniall.log
+SHA-256=d61df417e990127e1c2f21f46bbce43198d0bf038b3f52479c423318b2e05c1c
+```
+
+Final diagnostic libGL in the uniform run:
+
+```text
+SHA-256=a5471a7f75d20c3eed9222ac23afc9906baa0c5ac259a38d35f5684e33e9907f
+```
+
+Box64 diagnostic wrapper:
+
+```text
+SHA-256=33ef530199d26cbb3491fbacf106980932ca160662e297a63bcbfc10351bc850
+```
+
+## Program21 composition
+
+The program trace shows program21 linked/used after guest shaders 19 and 20:
+
+```text
+shader19: fragment, compile status=1
+shader20: vertex, compile status=1
+program21: link=1, use=1
+```
+
+The captured original shader source for shader19 is:
+
+```glsl
+#version 120
+uniform vec4 vMult;
+varying vec4 v_texcoord0;
+void main()
+{
+    gl_FragColor = vMult;
+}
+```
+
+The captured vertex source for shader20 includes:
+
+```glsl
+varying vec4 v_texcoord0;
+void main()
+{
+    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+    v_texcoord0 = vec4(0.5, 0.5, 0.5, 0.5);
+}
+```
+
+The same guest shader ID is later reused for a fragment shader containing `sampler2D sampler0`, `vMult`, and `vAdd`; allocation/ID reuse must therefore be tracked by compile/link chronology and not by numeric shader ID alone.
+
+## Uniform result
+
+Common `GoUniformfv/GoUniformiv` trace covered float/int/vector/matrix setter families. For program21:
+
+```text
+uniform name=vMult
+type=0x8b52 (vec4)
+location=0
+values repeatedly=0,0,0,0
+```
+
+The earlier `glUniform1i`-only trace was zero because program21 has no sampler uniform in this shader pair. The all-family trace corrected that classification.
+
+## Pixel/state correlation
+
+At the first actual program21 draw:
+
+```text
+logical/native FBO=3/3
+program=21
+viewport=0,0,1280,720
+scissor=disabled
+color mask=1111
+blend=0 depth=0 cull=0
+PIXEL_AFTER_DRAW rgba=0,0,0,0
+```
+
+This is consistent with the shader itself: the vertex position collapses to a single point and the fragment output is transparent black. This draw is therefore proven non-visible; it must not be used as evidence that native rasterization is broken.
+
+## Classification
+
+```text
+program21 compile/link: PASS
+program21 vertex position: literal zero
+program21 fragment output: vMult
+program21 vMult value: zero
+program21 draw visible: IMPOSSIBLE for this shader pair
+FBO3 black after program21 draw: EXPLAINED
+FBO3/FBO1/FBO2 complete: PASS with corrected NOTEST values
+whole game black-screen cause: NOT YET PROVEN
+```
+
+The shader source does not contain the literal zero-position text in the pinned gl4es source tree or gl4es binary, so this pair comes from the guest/application shader source or an application-generated shader string, not a gl4es hard-coded blit shader.
+
+## Required next phase
+
+Do not rewrite program21 or force non-zero `vMult`. First identify the application call sequence that creates/uses this pair and determine whether it is a deliberate dummy/clear pass or an incorrectly generated title pass:
+
+```text
+trace glAttachShader/glLinkProgram with attached shader IDs
+trace every shader source name/length/hash and compile order
+trace program use + first draw chronology
+trace vertex attribute pointer/enable state for the first non-dummy game program
+trace all texture-unit bindings and sampler uniforms for the first non-dummy program
+find the first draw whose shader has non-zero gl_Position and non-zero fragment output
+```
+
+Production package/launcher remained untouched.

@@ -1,0 +1,64 @@
+Guacamelee Box32 direct clean error-origin baseline
+Date: 2026-09-17
+
+Purpose
+-------
+Classify whether the previously observed app-side 0x502 is genuine or induced by
+pixel readback/state-query diagnostics.
+
+Source/build
+------------
+- gl4es pinned upstream: 81547d986798e876de8b434193920b606a72363f
+- clean baseline libGL SHA-256:
+  696279a0b269cf50a3fe3f6ce59642d2da65075aaebcb6fe438961567e07cbef
+- Box64 used: affinity-trace/lowptr validated binary
+  3df6b511cc8ce453967e4b7621515717ae3340e21d5b6a7f30aefe558dfbd06c
+- diagnostic patch intent: gl4es-notest-maxcolorattach.patch; error-origin trace;
+  pixel trace disabled by default; attachment remap removed from wrap/gles.c
+- exact CMake command: cmake --build /build -j2
+- max required GLIBC: not re-measured in this run; prior Box64 constraint GLIBC_2.29
+
+Runtime delta
+-------------
+- original game-bin, cwd=gamedata
+- SDL_VIDEODRIVER=KMSDRM
+- native EGL/GLES paths from launcher
+- LIBGL_NOTEST=1, LIBGL_ES=2, LIBGL_GL=21
+- GUA_ENABLE_PIXEL_TRACE unset (gua_pixel_trace returns before any readback)
+- GUA_ERROR_TRACE=1 for the second run
+- no direct-present helper (Box64 3df6 binary; no GUA-PRESENT strings)
+- no LIBGL_FB, LIBGL_FBOFORCETEX, LIBGL_SHRINK, X11 stub, or attachment remap
+
+Device evidence
+---------------
+- launcher: /mnt/SDCARD/Roms/PORTS/Guacamelee-box32-direct.sh
+- baseline install was temporary and restored afterward
+- clean baseline hardext snapshot:
+  es=2 fbo=1 drawbuffers=0 maxdrawbuffers=1 maxcolorattach=1
+  depthstencil=1 depth24=0 rgba8=0 npot=1 maxtex=8 maxsize=2048
+- SDL_GL_CreateContext returned a non-null context
+- FBO checks returned status 0x8cd5 for logical FBO1/FBO2
+- no non-zero GUA-GETERROR result and no GUA-SHIM-ERROR-LATCH observed before crash
+- no scene draw, swap, or visible frame was reached
+- process ended with Box64 SIGSEGV in fclose(NULL):
+  x64pc=0x30008993, box64/fclose+0x13, accessing NULL, exit_code=139
+- this is an independent early Box64 cleanup/ABI blocker; it occurs before the
+  former VideoSys.cpp:1644 render boundary in this clean configuration
+
+Raw evidence
+------------
+- /mnt/external/Hermes/guac-clean-runtime.log
+  SHA-256 9ccf2195ff87c72a7a2a3c3731b3080f25baf2f6b3f5887566f4971862bec147
+- prior run /mnt/external/Hermes/guac-clean-runtime.1.log
+  SHA-256 90e3f0125c28a7a04d3cd4a48538946e1b194b68d1f8bfad866214eb66ef1189
+- source patch /experiments/box32-direct/src/gl4es-error-origin-trace.patch
+  SHA-256 85126a9a56d1133845b712c4b2efbb9c02d48f10972670916c6a9216b6477913
+
+Conclusion
+----------
+This run does not prove whether VideoSys.cpp:1644's 0x502 is genuine because
+clean Box64 crashes before reaching it. It does prove that the clean diagnostic
+configuration itself reaches SDL context creation and complete corrected FBO
+checks, then fails at fclose(NULL). The old 0x502 must not be ranked as a clean
+baseline result until this early Box64 crash is removed or a validated Box64
+variant reaches the scene without behavior-changing render instrumentation.

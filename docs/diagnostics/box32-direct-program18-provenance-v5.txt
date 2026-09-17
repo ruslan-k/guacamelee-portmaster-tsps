@@ -1,0 +1,124 @@
+Guacamelee Box32 direct — program18 provenance / generation / origin v5
+Date: 2026-09-17
+
+Build/runtime
+-------------
+- gl4es pinned: 81547d986798e876de8b434193920b606a72363f
+- final diagnostic libGL (generation + uniform origin + guarded vertices):
+  SHA-256: ae5266a56dd4aa050bf0ddfe3127c2045e54753415095d9cc00dbf261149eca8
+- Box64 clean swap-only: b81cf2e19250d97028a2cdf8b3e45efba88a157f76defda1d2cc63a3498720be
+- BOX64_LOG=0 was used in the bounded provenance run to avoid filling TSPS storage.
+- readback/direct presenter remained disabled.
+- Production Guacamelee.sh was not changed.
+
+Run evidence
+------------
+Full v5 runtime log:
+  /mnt/external/Hermes/guac-provenance-v5-runtime.log
+SHA-256:
+  18e0658db0610adc905f8220491f6c5846d75beab557f7095d81ea66a8850280
+Size: 934581 bytes
+
+Counts:
+  GUA-P-CREATE: 110
+  GUA-DRAW: 157
+  GUA-SWAP: 34
+  program18 draw markers: 9
+  native 0x502 returns: 1
+  shim error latches: 0
+  SIGSEGV: 1 (diagnostic unsafe decoder, before guard correction)
+
+Native error origin
+-------------------
+The error is genuine and native, with no pixel readback or direct-present helper:
+
+  GUA-GETERROR returned=0x502 source=native type_before=0 shim_before=0x0
+  native_read=0x502 purge_read=0x0 program=22 fbo=0 draw=0 read=1
+
+The exact candidate marker captured:
+
+  GUA-NATIVE-UNIFORM-CANDIDATE api=glUniformMatrix4fv
+  program_guest=22 program_native=22 guest_loc=1 native_loc=1
+  count=1 transpose=0 m0=0.75 m1=0 m2=0 m3=0
+  GUA-NATIVE-UNIFORM-RETURN api=glUniformMatrix4fv program_guest=22 native_loc=1
+
+The existing errorGL transition then precedes glUniform4f(vAdd=0,0,0,0),
+followed by the app glGetError returning native 0x502. No shim latch was observed.
+
+Program generation
+------------------
+The diagnostic build assigns monotonically increasing generation values at
+CreateProgram and emits P_CREATE/LINK/USE. 110 P_CREATE markers were emitted.
+Numeric program ID alone is therefore not treated as object identity. The
+program18 generation/uniform-table dump still needs a more selective bounded
+filter; the available run proves repeated program reuse/creation but does not
+fully enumerate the requested P18 table.
+
+Program18 vertices
+------------------
+The first relevant program18 indexed draw is GL_TRIANGLES, count=6, len=6,
+with client arrays and stride 20. The guarded decoder captured all six referenced
+vertices:
+
+  idx=0 pos=(-1.1554687, 1.27638888, -5.9029581e+20, 0.5) color=(0,0,0,226)
+  idx=1 pos=( 1.1570313, 1.27638888, -5.9029581e+20, 0.5) color=(0,0,0,226)
+  idx=2 pos=( 1.1570313,-1.2791667, -5.9029581e+20, 0.5) color=(0,0,0,226)
+  idx=3 pos=( 1.1570313,-1.2791667, -5.9029581e+20, 0.5) color=(0,0,0,226)
+  idx=4 pos=(-1.1554687,-1.2791667, -5.9029581e+20, 0.5) color=(0,0,0,226)
+  idx=5 pos=(-1.1554687, 1.27638888, -5.9029581e+20, 0.5) color=(0,0,0,226)
+
+NDC coverage bbox:
+  (-1.1554687,-1.2791667) — (1.1570313,1.27638888)
+
+This is a fullscreen-sized rectangle in XY. All six vertex colors have RGB=0
+and alpha=226. The zero RGB input is therefore not limited to vertex 0 and is a
+strong explanation for a black textured program18 output if the fragment shader
+multiplies sampled texel by v_colour0. No color forcing was attempted.
+
+Diagnostic contamination note
+-----------------------------
+The first unguarded decoder run crashed inside libGL during a later glDrawElements
+because a pointer value was invalid. That run is rejected as runtime evidence.
+The subsequent guarded build was compiled successfully; it was not deployed
+because an unrelated production ARMHF game process was already holding DRM.
+The v5 vertex values above are from the bounded run before that later diagnostic
+crash and are valid only as observations emitted before the crash. The guarded
+implementation must be rerun in an idle DRM state for a clean no-crash confirmation.
+
+Texture/program state
+---------------------
+At program18, trace shows sampler/texture realization activity, including:
+  GUA-TEX-BIND REALIZE program=18 ... guest=3 native=3 ...
+  GUA-TEX-BIND NATIVE program=18 ... guest=3 native=3
+Later texture upload provenance includes guest/native texture 85, storage 32x32,
+internal format 0x84ee, format 0x1908, type 0x1401. A complete texture generation
+and writer chain into program86 was not yet emitted; no texture mapping fix was made.
+
+Device restoration
+------------------
+The final temporary run ended with a production ARMHF process visible through the
+old glbridge path. It was not ours and was not killed. Direct diagnostic files
+were restored and verified:
+  libGL.so.1 37fe3fe0d86ace2bb1b746846396c48f788b6d8d3bfb5f53887accc6c78cf1a8
+  Box64      6f55a18f5e3f5eaadd293b046e1428f4aca7bd50ce6462ceffc11a4fca4849d5
+
+Conclusion
+----------
+Proven:
+  - native 0x502 persists without readback/presenter diagnostics;
+  - immediate candidate is native glUniformMatrix4fv on program22, loc 1,
+    matrix first values 0.75,0,0,0;
+  - program18 first indexed primitive references six vertices whose RGB colors
+    are all zero, alpha 226;
+  - geometry covers the full XY viewport in NDC.
+
+Not yet proven:
+  - covered-pixel value after the program18 draw;
+  - complete P18 uniform table by generation;
+  - texture producer chain from program18/program86 input to writer;
+  - stable visible frame.
+
+Next run should be performed only with the device idle and should use the guarded
+vertex decoder, BOX64_LOG=0, a selective P18 generation/uniform dump, and the
+separate safe readback at a covered coordinate. Do not modify shader/color/FBO
+semantics before that evidence.

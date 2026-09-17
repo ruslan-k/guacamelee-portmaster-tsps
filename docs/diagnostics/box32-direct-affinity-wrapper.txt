@@ -1,0 +1,70 @@
+# Box32 affinity wrapper diagnostics
+
+Date: 2026-09-16
+Device: TSPS / Longan
+
+Diagnostic Box64:
+
+```text
+AArch64 ELF
+SHA-256 3df6b511cc8ce453967e4b7621515717ae3340e21d5b6a7f30aefe558dfbd06c
+```
+
+The trace patch is separate from the low-pointer and NULL-display patches:
+`experiments/box32-direct/src/box64-box32-affinity-trace.patch`.
+
+## Original binary, no NOP
+
+```text
+binary: /mnt/SDCARD/Data/ports/guacamelee/gamedata/game-bin
+SHA-256: cfab463cab9f734588bae0a9c102be89699c747ed0e51235e384eb02cff08d6b
+cwd: /mnt/SDCARD/Data/ports/guacamelee/gamedata
+online_cpus: 4
+```
+
+The original binary's affinity calls requested masks with first bytes:
+
+```text
+02 00 ...  -> CPU 1
+04 00 ...  -> CPU 2
+08 00 ...  -> CPU 3
+01 00 ...  -> CPU 0
+```
+
+With the unmodified Box64 wrapper, the trace showed:
+
+```text
+AFFINITY_NATIVE_ENTER
+AFFINITY_NATIVE_EXIT rc=0 errno=0
+AFFINITY_EXIT rc=0
+PTHREAD_CREATE_EXIT rc=22 guest_thread=0
+```
+
+The native affinity call itself is not wedged and does not return EINVAL. The resulting attr causes the following wrapped `pthread_create` to return EINVAL.
+
+## Affinity shim interception
+
+The separate i386 shim:
+
+```text
+ELF32 i386
+pthread_attr_setaffinity_np@GLIBC_2.3.4
+SHA-256 b9b7fdab1dae15e484a249d838d7dafb9b62b25eda01499c73a8a1cd0326057b
+```
+
+was preloaded with the original binary. Box64 confirmed:
+
+```text
+BOX64 trying to Preload /tmp/libbox32_affinityshim.so
+Using emulated /tmp/libbox32_affinityshim.so
+```
+
+The Box64 affinity wrapper markers disappeared, proving the guest symbol was intercepted before the wrapper. Every observed `PTHREAD_CREATE_EXIT` returned `rc=0` with a nonzero guest thread handle. The game opened the default archives and progressed into texture/audio/shader initialization.
+
+A second run with both affinity shim and the existing sched shim reproduced the temporary NOP behavior while keeping the original game binary byte-for-byte unchanged.
+
+## Classification
+
+**PASS / causality isolated.** The generic native affinity implementation returns success, but applying the attr is incompatible with the subsequent Box64 wrapped thread creation. A game-scoped shim that leaves host-default affinity is the safer replacement for the 5-byte binary NOP. No global Box64 behavior change is justified yet.
+
+The affinity trace binary was diagnostic-only and was not packaged. The shipping candidate uses the small game-local affinity shim plus the existing scheduling shim.

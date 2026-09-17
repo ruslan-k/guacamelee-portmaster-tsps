@@ -1,0 +1,113 @@
+# Max color attachment and resolve blocker
+
+## Root cause fixed in diagnostic source
+
+With `LIBGL_NOTEST=1`, `GetHardwareExtensions()` returns from the notest branch before the normal draw-buffer capability fallback. `hardext.maxcolorattach` therefore stayed zero.
+
+The color texture attachment validation rejected every color attachment:
+
+```text
+VALIDATE ... attachment=0x8ce0 maxcolorattach=0
+```
+
+Correct source change for the notest branch:
+
+```c
+hardext.maxdrawbuffers = 1;
+hardext.maxcolorattach = 1;
+```
+
+## Corrected FBO result
+
+With `hardext.maxcolorattach=1` and `hardext.depthstencil=1`:
+
+```text
+maxcolorattach=0: 0
+maxcolorattach=1: 5
+ATTACH_STATE: 5
+FBO status 0x8cdd: 0
+FBO status 0x8cd5: 6
+INCOMPLETE_MISSING_ATTACHMENT: 0
+GL error 0x506: 0
+SIGSEGV: 0
+```
+
+Color attachment now completes normally:
+
+```text
+color0=1/t0xde1
+status=0x8cd5
+```
+
+## Resolve result
+
+The actual game resolve is present and stable:
+
+```text
+BLIT: 158–241 per short run
+read FBO: 1
+read texture: guest/native 1/1
+draw FBO: 2
+draw texture: guest/native 2/2
+size: 1280x720
+created: 0
+GL errors: 0
+```
+
+The corrected direct SDL present helper was called through the rebuilt Box64 wrapper:
+
+```text
+GUA-PRESENT: 363
+DIRECT_PRESENT: 370
+```
+
+However, native readback from the final destination FBO2 before present is consistently:
+
+```text
+PRESENT_SAMPLE fbo=2 rgba=0,0,0,255
+```
+
+The captured screen remains uniformly black:
+
+```text
+fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+## Classification
+
+```text
+notest maxcolorattach initialization: ROOT CAUSE FOUND
+color attachment bookkeeping: FIXED in diagnostic runtime
+packed depth/stencil completeness: FIXED in corrected A/B
+resolve call: PRESENT
+resolve GL errors: NONE
+FBO2 destination content: BLACK
+visible output: NOT FIXED
+```
+
+The remaining issue is upstream of SDL present: the source path feeding FBO1/FBO2 contains black pixels despite successful draw calls. The next trace must sample source FBO1 immediately before each resolve and identify which logical FBO receives the actual scene draw. No presenter workaround is promoted because it was proven to copy a black texture.
+
+## Artifacts
+
+Corrected diagnostic gl4es:
+
+```text
+SHA-256:
+cf93a3cb6a5ca7ca0dd9f9fa70f7e24033f4ccb34dd807eb1d0b8330842ab353
+```
+
+Latest resolve log:
+
+```text
+SHA-256:
+6b8a99234866578a0af417c922def1e53d74571ed483a896ce5a309dc58b05a9
+```
+
+Corrected Box64 SDL-present wrapper:
+
+```text
+SHA-256:
+33ef530199d26cbb3491fbacf106980932ca160662e297a63bcbfc10351bc850
+```
+
+Production package and launcher remain unchanged. Temporary TSPS test processes and artifacts were removed; MainUI remains active.

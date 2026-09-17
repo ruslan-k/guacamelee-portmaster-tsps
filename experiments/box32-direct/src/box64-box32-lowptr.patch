@@ -1,0 +1,111 @@
+diff --git a/src/wrapped32/wrappedlibgl.c b/src/wrapped32/wrappedlibgl.c
+index 06ad51e..6a1a6cb 100644
+--- a/src/wrapped32/wrappedlibgl.c
++++ b/src/wrapped32/wrappedlibgl.c
+@@ -28,6 +28,57 @@ extern const char* libglName;
+ 
+ void* getDisplay(void* d); // define in 32bits wrappedx11.c
+ 
++typedef void* (*pFu_t)(uint32_t);
++typedef char* (*tFuu_t)(uint32_t, uint32_t);
++
++EXPORT void* my32_glGetString(x64emu_t* emu, uint32_t name)
++{
++    pFu_t fnc = getBridgeFnc2((void*)R_RIP);
++    if(!fnc) fnc = (pFu_t)my->glGetString;
++    const char* src = (const char*)fnc(name);
++    if(!src) return NULL;
++    size_t n = strlen(src) + 1;
++    char* dst = (char*)box32_malloc(n);
++    if(dst) memcpy(dst, src, n);
++    return dst;
++}
++
++EXPORT char* my32_glGetStringi(x64emu_t* emu, uint32_t name, uint32_t index)
++{
++    tFuu_t fnc = getBridgeFnc2((void*)R_RIP);
++    if(!fnc) fnc = (tFuu_t)my->glGetStringi;
++    const char* src = fnc(name, index);
++    if(!src) return NULL;
++    size_t n = strlen(src) + 1;
++    char* dst = (char*)box32_malloc(n);
++    if(dst) memcpy(dst, src, n);
++    return dst;
++}
++
++static void* box32_glx_string(const char* s)
++{
++    size_t n = strlen(s) + 1;
++    char* dst = (char*)box32_malloc(n);
++    if(dst) memcpy(dst, s, n);
++    return dst;
++}
++
++EXPORT void* my32_glXGetClientString(x64emu_t* emu, void* dpy, int name)
++{
++    (void)emu; (void)dpy; (void)name;
++    return box32_glx_string("GL4ES direct KMSDRM");
++}
++EXPORT void* my32_glXQueryExtensionsString(x64emu_t* emu, void* dpy, int screen)
++{
++    (void)emu; (void)dpy; (void)screen;
++    return box32_glx_string("");
++}
++EXPORT void* my32_glXQueryServerString(x64emu_t* emu, void* dpy, int screen, int name)
++{
++    (void)emu; (void)dpy; (void)screen; (void)name;
++    return box32_glx_string("");
++}
++
+ // FIXME: old wrapped* type of file, cannot use generated/wrappedlibgltypes.h
+ EXPORT void* my32_glXGetProcAddress(x64emu_t* emu, void* name)
+ {
+diff --git a/src/wrapped32/wrappedlibgl_private.h b/src/wrapped32/wrappedlibgl_private.h
+index e26996f..33f7c5a 100644
+--- a/src/wrapped32/wrappedlibgl_private.h
++++ b/src/wrapped32/wrappedlibgl_private.h
+@@ -104,7 +104,7 @@ GO(glGetPixelMapfv, vFup)
+ GO(glGetPixelMapuiv, vFup)
+ GO(glGetPixelMapusv, vFup)
+ GO(glGetPolygonStipple, vFp)
+-GO(glGetString, pFu)
++GOM(glGetString, pFEu)
+ GO(glGetTexEnvfv, vFuup)
+ GO(glGetTexEnviv, vFuup)
+ GO(glGetTexGendv, vFuup)
+@@ -614,7 +614,7 @@ GO(glEndTransformFeedback, vFv)
+ GO(glGetBooleani_v, vFuup)
+ GO(glGetFragDataLocation, iFup)
+ GO(glGetIntegeri_v, vFuup)
+-GO(glGetStringi, tFuu)
++GOM(glGetStringi, pFEuu)
+ GO(glGetTexParameterIiv, vFuup)
+ GO(glGetTexParameterIuiv, vFuup)
+ GO(glGetTransformFeedbackVarying, vFuuipppp)
+@@ -2967,7 +2967,7 @@ GO(glXDestroyWindow, vFXL)
+ GO(glXEnumerateVideoCaptureDevicesNV, pFXip)
+ GO(glXEnumerateVideoDevicesNV, pFXip)
+ GO(glXFreeContextEXT, vFXp)
+-GO(glXGetClientString, pFXi)
++GOM(glXGetClientString, pFEXi)
+ //GOM(glXGetConfig, iFEXbpLiiiLLLii_ip)
+ GO(glXGetContextIDEXT, uFp)
+ GO(glXGetCurrentContext, pFv)
+@@ -3002,7 +3002,7 @@ GO(glXQueryContext, iFXpip)
+ GO(glXQueryContextInfoEXT, iFXpip)
+ GO(glXQueryDrawable, vFXLip)
+ GO(glXQueryExtension, iFXpp)
+-GO(glXQueryExtensionsString, pFXi)
++GOM(glXQueryExtensionsString, pFEXi)
+ GO(glXQueryFrameCountNV, iFXip)
+ GO(glXQueryGLXPbufferSGIX, vFXpip)
+ //GO(glXQueryHyperpipeAttribSGIX, iFpiiip)
+@@ -3011,7 +3011,7 @@ GO(glXQueryGLXPbufferSGIX, vFXpip)
+ //GO(glXQueryHyperpipeNetworkSGIX, pFpp)
+ //GO(glXQueryMaxSwapBarriersSGIX, pFpp)
+ GO(glXQueryMaxSwapGroupsNV, iFXipp)
+-GO(glXQueryServerString, pFXii)
++GOM(glXQueryServerString, pFEXii)
+ GO(glXQuerySwapGroupNV, iFXipp)
+ GO(glXQueryVersion, iFXpp)
+ GO(glXQueryVideoCaptureDeviceNV, iFXpip)

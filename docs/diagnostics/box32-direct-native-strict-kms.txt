@@ -1,0 +1,43 @@
+# Strict native KMS evidence
+
+Date: 2026-09-16
+Binary SHA-256: `1e885ac1141fbb3385f41946e454313c99e9869f180cd28c088aeb66a0952d75`
+
+Environment:
+
+```text
+SDL_VIDEODRIVER=KMSDRM
+SDL_KMSDRM_REQUIRE_DRM_MASTER=1
+BOX64_LIBGL unset
+BOX64_LD_PRELOAD unset
+LIBGL_FB unset
+LIBGL_SHRINK unset
+```
+
+Exact DRM owner was released first; `drm_master_probe` returned `setmaster_rc=0`.
+
+Probe output:
+
+```text
+SDL_Init rc=0 driver=KMSDRM
+CurrentDisplayMode 1280x720@60
+CreateWindow 1280x720
+CreateContext non-null
+window=1280x720 drawable=1280x720
+EGL display/context/draw/read all non-null
+EGL error=0x3000 vendor=ARM version=1.4 Valhall-r32p0
+GL vendor=ARM renderer=Mali-G57
+GL version=OpenGL ES 3.2 v1.r32p0
+swap=30,60,90,120
+hold-after-120
+```
+
+Every swap printed `drmModeMoveCursor() failed`, but KMS capture succeeded:
+
+```text
+kmsgrab: Screenshot saved ... (FB ID: 163, 1280x720)
+```
+
+Vision inspection of the live KMS capture: uniform full-screen magenta, no borders or black regions.
+
+Classification: **PASS**. Native SDL/KMSDRM/EGL/Mali scanout is viable when the exact MainUI/principal DRM owner is released and strict DRM master is required.

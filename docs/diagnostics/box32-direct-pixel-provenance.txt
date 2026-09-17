@@ -1,0 +1,160 @@
+# Box32 direct pixel provenance
+
+## Artifacts
+
+Diagnostic source patch:
+
+```text
+experiments/box32-direct/src/gl4es-frame-pipeline-trace.patch
+SHA-256=ae303fe5e0796aea804775b615b518d42c92d6c20d7c624756ee88693921e962
+```
+
+Latest texture/state raw log:
+
+```text
+/mnt/external/Hermes/texrun.log
+SHA-256=a76def9d981e67cdf7989c549a9269fb56751368287ca835d39c23533c3d7fa3
+```
+
+Latest uniform trace raw log:
+
+```text
+/mnt/external/Hermes/urun.log
+SHA-256=f9458d718c6d46f41fbbdd5caa32d70bb2ad8cb93cb440dd2aab1c3e28e4f0d1
+```
+
+Capture:
+
+```text
+SHA-256=fc1b68ee290c014095af36ca8f93d2d1b5508f5ed8fd31239b95cbce20d936e2
+```
+
+## Required stages
+
+### PIXEL_AFTER_DRAW
+
+FBO3 first meaningful draw:
+
+```text
+logical=3 native=3
+program=21
+rgba=0,0,0,0
+viewport=0,0,1280,720
+scissor=disabled
+color mask=1111
+blend=0 depth=0 cull=0
+```
+
+Across bounded samples:
+
+```text
+FBO3 samples: 18
+FBO3 non-black samples: 0
+```
+
+Default FBO samples included six non-black samples:
+
+```text
+rgba=109,167,160,255
+program=2
+texture0=34
+```
+
+These were isolated default/UI draws and did not propagate to the game resolve target.
+
+### PIXEL_PRE_BLIT
+
+```text
+logical draw=2 read=1 native=2
+read source attachment guest/native texture=1/1
+rgba=0,0,0,0 on earliest sample
+```
+
+Later samples were `0,0,0,255` after initialization, but never contained scene pixels.
+
+### PIXEL_POST_BLIT
+
+```text
+destination FBO2/native2
+rgba=0,0,0,255
+```
+
+The blit implementation runs without GL errors, but destination content remains black.
+
+### PIXEL_PRE_SWAP / PRESENT_SAMPLE
+
+```text
+PRESENT_SAMPLE fbo=2 rgba=0,0,0,255
+```
+
+This agrees with post-blit readback. The present helper is not copying a non-black frame and then losing it.
+
+## Texture provenance
+
+FBO target textures:
+
+```text
+FBO3 color attachment: guest/native texture 89/89
+FBO4 color attachment: guest/native texture 90/90
+FBO5 color attachment: guest/native texture 91/91
+```
+
+Texture uploads:
+
+```text
+texture89 level0: 512x512, internal=0x84ee, data != NULL, mip levels present
+texture90 level0: 1280x720, internal=0x8058, data = NULL
+texture91 level0: 1280x720, internal=0x8058, data = NULL
+texture92 level0: 1280x720, internal=0x8058, data = NULL
+```
+
+Numeric IDs are allocation-order dependent. In the sampled run the first FBO3 draw bound texture92 at texture unit 0; in another run the equivalent render-target binding was texture91. The stable fact is that the first FBO3 draw samples an empty render-target texture rather than a loaded content texture.
+
+Texture91/92 are allocated as 1280x720 render targets with `data=NULL`; this is expected storage allocation but makes them unsuitable as non-black input until a prior pass fills them.
+
+## Program/uniform provenance
+
+Program21:
+
+```text
+link=successful
+use=successful
+native program=21
+```
+
+No `glUniform1i` calls were observed while guest program21 was active in the bounded uniform trace:
+
+```text
+GUA-UNIFORM1I program=21: 0
+```
+
+Therefore sampler assignment is not proven through `glUniform1i`; it may use another uniform family, cached/default state, or program21 may not be the expected texturing program for this first pass. This is the highest-value unresolved draw-state question.
+
+## Classification
+
+```text
+FBO3 non-black after draw: NO
+FBO1 non-black before blit: NO
+FBO2 non-black after blit: NO
+FBO2 non-black before swap: NO
+Default FBO occasional non-black sample: YES
+late clear as cause of first FBO3 black: NOT SUPPORTED
+FBO logical/native mismatch: NOT OBSERVED
+SDL swap reached: YES
+```
+
+## Next handoff
+
+The next plan should trace only the title/first-pass program(s), especially program21:
+
+```text
+program attached shader IDs and source-derived shader names
+all uniform setter families for program21 (1i/1f/2f/4f/matrix)
+uniform locations and sampler values
+vertex attribute enable/pointer state
+actual texture unit bindings at native draw
+texture89/90/91/92 provenance at draw
+native shader translated source or compile log for program21
+```
+
+Do not add another FBO capability flag or presenter workaround until this draw-state provenance is classified. Production bridge/launcher/package remained untouched throughout.
