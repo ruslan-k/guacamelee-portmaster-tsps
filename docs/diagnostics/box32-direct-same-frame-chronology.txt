@@ -1,28 +1,47 @@
-# Same-frame black chronology
+# Same-frame / first-resolve chronology
 
-A synchronized complete same-frame chronology is not yet available. Existing
-ordered evidence establishes the following partial chain:
+Raw first-cycle trace:
+  /mnt/external/Hermes/guac-writer-runtime.log
+  SHA-256=699d33ad70bc10cc133f8b6023ca7547e6b3d4b18bae53434ac6806c0c8fec3c
+
+Ordered first resolve cycle:
 
 ```text
-program2 native/default FBO0 -> non-black sample observed
-program86 selected sample -> NONBLACK to BLACK observed
-program86 sampler0 -> texture2 generation1 / FBO2 color attachment
-FBO1 immediately before BLIT -> black
-FBO2 immediately after BLIT -> black
-FBO0 at exact pre-resolve boundary -> black
-SWAP -> invoked through Box64 wrapper
+seq=38 bind GL_FRAMEBUFFER 1; native FBO1
+seq=40 glClearColor(0,0,0,1) while FBO1 current/draw
+seq=41 bind GL_READ_FRAMEBUFFER 1
+seq=42 bind GL_DRAW_FRAMEBUFFER 2
+seq=44 ReadDraw_Push(GL_READ_FRAMEBUFFER)
+seq=47 BLIT FBO1 -> FBO2
+seq=48 bind GL_FRAMEBUFFER 0; native FBO0
+seq=51+ scene draws on FBO0
 ```
 
-The `program2` draw and later `program86` transition are not yet mapped to a
-single global frame/write sequence with all clears and every FBO. No new fix was
-selected on this incomplete chronology.
-
-Status:
+The sampled transition later in the same ordered run is:
 
 ```text
-FIRST_SAME_FRAME_NONBLACK_TO_BLACK_WRITER=program86 observed, exact same-frame linkage NOT PROVEN
+program2 on native FBO0: sample rgba=109,167,160,255 observed
+program86 selected sample: rgba=0,0,0,255 observed
+FBO1 before resolve: rgba=0,0,0,255
+FBO2 after resolve: rgba=0,0,0,255
+```
+
+The first-cycle trace directly proves FBO1's first writer is a black clear. It
+does not show a non-black FBO1 writer before the resolve. Program2 and program86
+are both on FBO0; the exact global link between the historical program2
+non-black sample and the later program86 transition is not fully frame-indexed.
+
+Classification:
+
+```text
+FIRST_SAME_FRAME_NONBLACK_TO_BLACK_WRITER=program86 observed; exact same-frame linkage NOT PROVEN
+FBO1_FIRST_WRITER=seq40/glClearColor+glClear
+FBO1_LAST_WRITER_BEFORE_RESOLVE=seq40/glClearColor+glClear
 FBO1_PRE_RESOLVE=BLACK
 FBO0_PRE_RESOLVE=BLACK
 FBO2_POST_RESOLVE=BLACK
 FIX_SELECTED=NONE
 ```
+
+No FBO routing fix is justified: the guest bind intent is preserved and the
+first FBO1 writer is an explicit black clear.

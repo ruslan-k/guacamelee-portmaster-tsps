@@ -19,8 +19,13 @@ Updated 2026-09-17. Later reports supersede only the specific overclaims noted b
 - native error pre-clean window: prior 0x502 exists before P2 draw
 - program2 `glDrawArrays` direct producer: DISPROVEN (`PRE_CLEAN=1`, `POST=0x0`)
 - program2 texture/buffer/attribute realization calls: no direct 0x502 in per-call window
-- remaining error boundary: later `realize_glenv` program/uniform/fixed-state path NOT YET SPLIT
-- P22 matrix direct producer: NO
+- P22 matrix direct producer: DISPROVEN
+- remaining 0x502 candidate: later `realize_glenv` program/uniform/fixed-state path NOT YET SPLIT
+- FBO1 first writer: explicit black `glClearColor/glClear` at seq=40
+- FBO1 last writer before resolve: same clear; no non-black writer observed
+- guest scene draw intent on FBO1: NO
+- gl4es lost FBO1 draw intent: NO
+- FBO1 resolve-source population: expected by use, non-black writer absent
 - stable visible menu/gameplay: NOT PROVEN
 - input/audio/normal PortMaster lifecycle: NOT TESTED
 
