@@ -16,8 +16,10 @@ Updated 2026-09-17. Later reports supersede only the specific overclaims noted b
 - scene selected draws: native/default FBO0
 - resolve source: FBO1
 - generic split READ/DRAW control: PASS
-- native error pre-clean window: prior 0x502 exists before P22 matrix
-- first direct draw checkpoint with 0x502: program2/glDrawArrays
+- native error pre-clean window: prior 0x502 exists before P2 draw
+- program2 `glDrawArrays` direct producer: DISPROVEN (`PRE_CLEAN=1`, `POST=0x0`)
+- program2 texture/buffer/attribute realization calls: no direct 0x502 in per-call window
+- remaining error boundary: later `realize_glenv` program/uniform/fixed-state path NOT YET SPLIT
 - P22 matrix direct producer: NO
 - stable visible menu/gameplay: NOT PROVEN
 - input/audio/normal PortMaster lifecycle: NOT TESTED
@@ -31,9 +33,10 @@ input or audio until a stable visible frame exists.
 ## Historical correction
 
 `NATIVE_502_PRODUCER=glUniformMatrix4fv` from earlier post-call-only evidence is
-superseded. The corrected pre-clean window found a pending native error before the
-matrix call; the bounded post-draw checkpoint found the first non-zero error after
-program2 `glDrawArrays`.
+superseded. The corrected windows found a pending native error before the P2
+draw; the clean P2 draw itself returned 0x0. Texture/buffer/attribute per-call
+checkpoints also returned 0x0. The remaining candidate is later
+`realize_glenv` program/uniform/fixed-state code.
 
 ## Next unresolved boundary
 

@@ -1,0 +1,28 @@
+# FBO1 writer and guest intent audit
+
+FBO1_FIRST_WRITER=UNKNOWN
+FBO1_LAST_WRITER_BEFORE_RESOLVE=UNKNOWN
+GUEST_INTENDS_SCENE_DRAW_FBO1=UNKNOWN
+GL4ES_LOSES_FBO1_DRAW_INTENT=UNKNOWN
+FBO1_EXPECTED_NON_DRAW_POPULATION=UNKNOWN
+
+Established facts:
+
+```text
+FBO1 origin = application-created framebuffer
+FBO1 color backing = renderbuffer path
+selected draw census in FBO1 = 0
+FBO1 pre-resolve = black
+FBO0 pre-resolve = black
+resolve = FBO1 -> FBO2
+```
+
+Existing bind/pipeline traces show selected scene draws with logical/native FBO0
+and the resolve read-side FBO1. They do not yet cover every possible writer
+(non-selected draw path, clear aliases, invalidate/discard, copy/resolve alias),
+so NONE is not claimed. No global FBO remap or local lost-DRAW-target fix was
+applied.
+
+Required next bounded trace: first render frame only, guest bind/clear/blit,
+all draw entry paths, renderbuffer attach/detach/recreate/delete, and native
+FBO binding. It must establish first/last FBO1 writer before any fix.

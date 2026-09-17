@@ -1,0 +1,28 @@
+# Same-frame black chronology
+
+A synchronized complete same-frame chronology is not yet available. Existing
+ordered evidence establishes the following partial chain:
+
+```text
+program2 native/default FBO0 -> non-black sample observed
+program86 selected sample -> NONBLACK to BLACK observed
+program86 sampler0 -> texture2 generation1 / FBO2 color attachment
+FBO1 immediately before BLIT -> black
+FBO2 immediately after BLIT -> black
+FBO0 at exact pre-resolve boundary -> black
+SWAP -> invoked through Box64 wrapper
+```
+
+The `program2` draw and later `program86` transition are not yet mapped to a
+single global frame/write sequence with all clears and every FBO. No new fix was
+selected on this incomplete chronology.
+
+Status:
+
+```text
+FIRST_SAME_FRAME_NONBLACK_TO_BLACK_WRITER=program86 observed, exact same-frame linkage NOT PROVEN
+FBO1_PRE_RESOLVE=BLACK
+FBO0_PRE_RESOLVE=BLACK
+FBO2_POST_RESOLVE=BLACK
+FIX_SELECTED=NONE
+```

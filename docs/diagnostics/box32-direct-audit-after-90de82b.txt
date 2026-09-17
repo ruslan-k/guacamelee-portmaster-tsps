@@ -1,0 +1,22 @@
+# Audit after 90de82b
+
+HEAD=90de82b91f7980cb4ad2bcfdf0cc81a6597d53b1
+PROGRAM18_FIRST_BLACK_WRITER=DISPROVEN
+PROGRAM86_SAMPLED_NONBLACK_TO_BLACK=PROVEN
+P86_SAMPLER0_OBJECT_MATCH=YES
+FBO1_PRE_RESOLVE=BLACK
+FBO0_PRE_RESOLVE=BLACK
+SPLIT_READ_DRAW_CONTROL=PASS
+P22_MATRIX_DIRECT_502_PRODUCER=DISPROVEN
+PROGRAM2_POSTDRAW_502_CANDIDATE=YES
+PROGRAM2_DIRECT_502_PRODUCER=NOT_YET_PROVEN
+FBO1_COMPLETE_WRITER_CHAIN=NOT_YET_PROVEN
+STABLE_VISIBLE_FRAME=NOT_YET_PROVEN
+
+Correction: historical pixel texture/buffer fields from pre-fix runs are invalidated by the varargs format bug. RGBA/FBO/program fields from that specific bug are not invalidated. No historical report was rewritten.
+
+The corrected P2 window established PRE_CLEAN=1 and POST_DRAW=0. The segment
+window first showed an error after realize_textures, but per-call checkpoints
+then showed texture/array/attribute calls clean. Therefore this is not enough to
+claim a texture or draw producer; remaining realize_glenv program/uniform/fixed
+state calls remain to be split.
