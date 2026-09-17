@@ -8,7 +8,7 @@ Updated 2026-09-17. Later reports supersede only the specific overclaims noted b
 - native KMSDRM/EGL context and real draws/swaps: PASS
 - natural program2 non-black raster control: PASS
 - program18 first black writer: DISPROVEN
-- program86 visible `NONBLACK -> BLACK` writer: PROVEN
+- program86 visible black sample: OBSERVED; causal `NONBLACK -> BLACK` writer NOT PROVEN
 - P86 sampler0/FBO2 texture object match: YES
 - texture2 generation alive; delete/reuse mismatch: NOT OBSERVED
 - FBO1 source immediately before resolve: BLACK

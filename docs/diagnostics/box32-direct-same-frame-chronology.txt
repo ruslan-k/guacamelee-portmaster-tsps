@@ -17,7 +17,24 @@ seq=48 bind GL_FRAMEBUFFER 0; native FBO0
 seq=51+ scene draws on FBO0
 ```
 
-The sampled transition later in the same ordered run is:
+The first 12 selected pixel records in the latest ordered run were:
+
+```text
+pixel_seq=5  prog=86 rgba=0,0,0,255
+pixel_seq=6  prog=2  rgba=0,0,0,255
+pixel_seq=14 prog=86 rgba=0,0,0,255
+pixel_seq=15 prog=2  rgba=0,0,0,255
+pixel_seq=18 prog=2  rgba=109,167,160,255
+pixel_seq=23 prog=86 rgba=0,0,0,255
+pixel_seq=24 prog=2  rgba=0,0,0,255
+pixel_seq=27 prog=2  rgba=109,167,160,255
+```
+
+Thus the latest synchronized ordered evidence does not show a preceding
+non-black sample immediately before the P86 black samples. It shows later P2
+non-black samples. The previous `program86 NONBLACK -> BLACK` statement is
+superseded as a same-frame causal claim.
+
 
 ```text
 program2 on native FBO0: sample rgba=109,167,160,255 observed
@@ -34,7 +51,7 @@ non-black sample and the later program86 transition is not fully frame-indexed.
 Classification:
 
 ```text
-FIRST_SAME_FRAME_NONBLACK_TO_BLACK_WRITER=program86 observed; exact same-frame linkage NOT PROVEN
+FIRST_SAME_FRAME_NONBLACK_TO_BLACK_WRITER=NONE_OBSERVED_IN_LATEST_ORDERED_RUN
 FBO1_FIRST_WRITER=seq40/glClearColor+glClear
 FBO1_LAST_WRITER_BEFORE_RESOLVE=seq40/glClearColor+glClear
 FBO1_PRE_RESOLVE=BLACK
