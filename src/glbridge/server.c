@@ -400,6 +400,8 @@ static unsigned op_ring_dumps;
 static int pixel_probe_enabled;
 static unsigned pixel_swap_count;
 static int pixel_dump_enabled;
+static char pixel_dump_trigger_path[256];
+static unsigned pixel_dump_trigger_swap;
 static int fbo_transition_diag = -1;
 static uint32_t fbo_transition_prev[64];
 static int gl_error_trace = -1;
@@ -2251,7 +2253,8 @@ static void pixel_probe_target(const char *stage, uint32_t fb, int w, int h,
             }
         }
     }
-    if (pixel_dump_enabled && (swap == 10 || swap == 600)) {
+    if (pixel_dump_enabled &&
+        (swap == 10 || swap == 600 || swap == pixel_dump_trigger_swap)) {
         size_t full_bytes = (size_t)w * (size_t)h * 4u;
         uint8_t *full = malloc(full_bytes);
         if (full) {
@@ -2297,8 +2300,22 @@ static void pixel_probe_target(const char *stage, uint32_t fb, int w, int h,
 
 static int pixel_probe_swap(unsigned swap)
 {
-    return swap == 1 || swap == 2 || swap == 3 || swap == 10 || swap == 30 ||
-           swap == 300 || swap == 600;
+    if (pixel_dump_trigger_swap == swap)
+        return 1;
+    if (pixel_dump_trigger_swap && pixel_dump_trigger_swap != swap)
+        pixel_dump_trigger_swap = 0;
+    if (swap == 1 || swap == 2 || swap == 3 || swap == 10 || swap == 30 ||
+        swap == 300 || swap == 600)
+        return 1;
+    if (pixel_probe_enabled && pixel_dump_enabled &&
+        pixel_dump_trigger_path[0] && swap % 30u == 0u &&
+        access(pixel_dump_trigger_path, F_OK) == 0 &&
+        unlink(pixel_dump_trigger_path) == 0) {
+        pixel_dump_trigger_swap = swap;
+        fprintf(stderr, "GUA-PIX trigger accepted swap=%u\\n", swap);
+        return 1;
+    }
+    return 0;
 }
 
 static void fbo_census_track(uint32_t op, const uint8_t *in, uint32_t len,
@@ -3230,8 +3247,12 @@ int main(void)
     {
         const char *pp = getenv("GUACAMELEE_PIXEL_PROBE");
         const char *pd = getenv("GUACAMELEE_PIXEL_DUMP");
+        const char *pt = getenv("GUACAMELEE_PIXEL_DUMP_TRIGGER_FILE");
         pixel_probe_enabled = pp && atoi(pp) != 0;
         pixel_dump_enabled = pd && atoi(pd) != 0;
+        if (pt && *pt)
+            snprintf(pixel_dump_trigger_path, sizeof(pixel_dump_trigger_path),
+                     "%s", pt);
     }
     {
         const char *or = getenv("GUACAMELEE_OP_RING");

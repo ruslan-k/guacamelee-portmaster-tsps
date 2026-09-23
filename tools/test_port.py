@@ -130,6 +130,9 @@ def main() -> int:
     assert 'GUACAMELEE_OP_RING="${GUACAMELEE_OP_RING:-0}"' in launcher_source
     assert 'GUACAMELEE_PIXEL_PROBE="${GUACAMELEE_PIXEL_PROBE:-0}"' in launcher_source
     assert 'GUACAMELEE_PIXEL_DUMP="${GUACAMELEE_PIXEL_DUMP:-0}"' in launcher_source
+    assert 'GUACAMELEE_PIXEL_DUMP_TRIGGER_FILE' in launcher_source
+    assert 'pixel_dump_trigger_swap = swap' in server_main_source
+    assert 'swap % 30u == 0u' in server_main_source
     assert 'GUACAMELEE_FBO_TRANSITION_DIAG="${GUACAMELEE_FBO_TRANSITION_DIAG:-0}"' in launcher_source
     assert 'GUACAMELEE_FBO_FORMAT_MATRIX="${GUACAMELEE_FBO_FORMAT_MATRIX:-0}"' in launcher_source
     assert 'GUACAMELEE_GL_ERROR_TRACE="${GUACAMELEE_GL_ERROR_TRACE:-0}"' in launcher_source
