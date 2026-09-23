@@ -78,7 +78,9 @@ def main() -> int:
     assert 'eglQuerySurface' in source
     assert "src[total++] = '\\n';" in server_source
     assert 'strip_img_ubo' in server_source
-    assert 'input_mode=guest_evdev' in launcher_source
+    assert 'input_mode=native_sdl' in launcher_source
+    assert 'libgua_sdl_mode_input_fix.so' in launcher_source
+    assert 'libgua_sdl_joystick_init.so' not in launcher_source
     assert 'libgua_evdev_input.so' in launcher_source
 
     # The bundled gl4es hardware probe intentionally submits desktop GLSL 120

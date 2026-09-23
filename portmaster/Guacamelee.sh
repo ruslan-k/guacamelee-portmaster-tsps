@@ -224,7 +224,7 @@ if [ "$BRIDGE" -eq 1 ]; then
     echo "Guacamelee hardext compatibility shim is missing"
     exit 2
   fi
-  SDL_MODE_FIX="${GUACAMELEE_SDL_MODE_FIX:-$GAMEDIR/compat/libgua_sdl_mode_fix.so}"
+  SDL_MODE_FIX="${GUACAMELEE_SDL_MODE_FIX:-$GAMEDIR/compat/libgua_sdl_mode_input_fix.so}"
   if [ "$SDL_MODE_FIX" != "0" ] && [ ! -f "$SDL_MODE_FIX" ]; then
     echo "Guacamelee SDL mode compatibility shim is missing"
     exit 2
@@ -239,7 +239,7 @@ if [ "$BRIDGE" -eq 1 ]; then
   echo "bridge_dimensions=${TSPGL_WIDTH}x${TSPGL_HEIGHT}"
   echo "box86_dynarec=$BOX86_DYNAREC bigblock=$BOX86_DYNAREC_BIGBLOCK log=$BOX86_LOG dlsym_error=$BOX86_DLSYM_ERROR dynarec_log=$BOX86_DYNAREC_LOG"
   echo "gl4es_es=$LIBGL_ES gl=$LIBGL_GL notest=$LIBGL_NOTEST shrink=$LIBGL_SHRINK fbotex=$LIBGL_FBOFORCETEX fb=$LIBGL_FB diag=$GUACAMELEE_GL_DIAG fbo_lifecycle=$GUACAMELEE_FBO_LIFECYCLE xport_diag=$GUACAMELEE_XPORT_DIAG depth_only_read_none=$GUACAMELEE_DEPTH_ONLY_READ_NONE real_glerror=$GUACAMELEE_REAL_GLERROR khr_debug=$GUACAMELEE_KHR_DEBUG op_ring=$GUACAMELEE_OP_RING pixel_probe=$GUACAMELEE_PIXEL_PROBE zero_viewport=$GUACAMELEE_ZERO_VIEWPORT rb_zero_size=$GUACAMELEE_RB_ZERO_SIZE fbo_texture_fallback=$GUACAMELEE_FBO_TEXTURE_FALLBACK unify_depth_stencil=$GUACAMELEE_UNIFY_DEPTH_STENCIL rb_format_fix=$GUACAMELEE_RB_FORMAT_FIX frontend_rb_size_fix=$GUACAMELEE_FRONTEND_RB_SIZE_FIX hardext_fix=$GUACAMELEE_HARDEXT_FIX"
-  INPUT_MODE="${GUACAMELEE_INPUT_MODE:-guest_evdev}"
+  INPUT_MODE="${GUACAMELEE_INPUT_MODE:-native_sdl}"
   case "$INPUT_MODE" in
     xbox_uinput)
       INPUT_HELPER="$GAMEDIR/compat/guac_uinput_xbox"
@@ -260,6 +260,14 @@ if [ "$BRIDGE" -eq 1 ]; then
       echo "input_mode=guest_evdev shim=$GAMEDIR/compat/libgua_evdev_input.so"
       [ -f "$GAMEDIR/compat/libgua_evdev_input.so" ] || { echo "guest evdev shim missing" >&2; exit 2; }
       export BOX86_LD_PRELOAD="$GAMEDIR/compat/libgua_evdev_input.so${BOX86_LD_PRELOAD:+:$BOX86_LD_PRELOAD}"
+      ;;
+    native_sdl)
+      INPUT_SHIM="$GAMEDIR/compat/libgua_sdl_mode_input_fix.so"
+      [ -f "$INPUT_SHIM" ] || { echo "native SDL joystick init shim missing" >&2; exit 2; }
+      # Box86 on this device loads one BOX86_LD_PRELOAD object; the combined
+      # shim also carries the established SDL mode fixes.
+      export BOX86_LD_PRELOAD="$INPUT_SHIM"
+      echo "input_mode=native_sdl shim=$INPUT_SHIM"
       ;;
     none) echo "input_mode=none" ;;
     *) echo "unknown input mode: $INPUT_MODE" >&2; exit 2 ;;
