@@ -51,6 +51,9 @@ typedef void GLvoid;
 #define st_scissor (tspgl_shared()->st_scissor)
 #define unpack_align (tspgl_shared()->unpack_align)
 
+static int vao_diag = -1;
+static unsigned vao_diag_calls;
+
 #define SH_MAX 2048
 struct shbuf {
     uint32_t id;
@@ -143,8 +146,45 @@ struct attrib {
     int stride;
     uint32_t ptr;
     int is_offset;
+    GLuint source_buffer;
+};
+struct vao_shadow {
+    GLuint id;
+    GLuint element_buffer;
+    struct attrib attrib[16];
 };
 static struct attrib attribs[16];
+static struct vao_shadow vaos[128];
+static struct vao_shadow vao0;
+static struct vao_shadow *current_vao = &vao0;
+
+static struct vao_shadow *find_vao(GLuint id, int create)
+{
+    unsigned i;
+    if (id == 0)
+        return &vao0;
+    for (i = 0; i < 128; ++i)
+        if (vaos[i].id == id)
+            return &vaos[i];
+    if (!create)
+        return NULL;
+    for (i = 0; i < 128; ++i) {
+        if (vaos[i].id == 0) {
+            vaos[i].id = id;
+            vaos[i].element_buffer = 0;
+            memset(vaos[i].attrib, 0, sizeof(vaos[i].attrib));
+            return &vaos[i];
+        }
+    }
+    return NULL;
+}
+
+__attribute__((constructor)) static void init_vao0(void)
+{
+    memset(&vao0, 0, sizeof(vao0));
+    vao0.id = 0;
+    current_vao = &vao0;
+}
 
 static unsigned type_bytes(GLenum type)
 {
@@ -494,8 +534,19 @@ void glDeleteVertexArrays(int32_t n, const uint32_t *ids)
     if (!ids)
         return;
     for (i = 0; i < n; ++i) {
-        if (ids[i] && ids[i] == bound_vao)
-            bound_vao = 0;
+        struct vao_shadow *v;
+        if (!ids[i])
+            continue;
+        v = find_vao(ids[i], 0);
+        if (v) {
+            if (v == current_vao) {
+                current_vao = &vao0;
+                memcpy(attribs, vao0.attrib, sizeof(attribs));
+                bound_element = 0;
+                bound_vao = 0;
+            }
+            memset(v, 0, sizeof(*v));
+        }
     }
 }
 
@@ -519,12 +570,8 @@ const GLubyte *glGetString(GLenum name)
         "GL_OES_texture_float GL_OES_texture_half_float "
         "GL_EXT_texture_format_BGRA8888 GL_EXT_blend_minmax "
         "GL_EXT_discard_framebuffer GL_OES_compressed_ETC1_RGB8_texture "
-        "GL_EXT_texture_filter_anisotropic "
-        "GL_EXT_shader_framebuffer_fetch GL_OES_vertex_array_object "
-        "GL_OES_mapbuffer GL_EXT_map_buffer_range GL_EXT_multi_draw_arrays "
-        "GL_OES_texture_3D GL_OES_get_program_binary GL_OES_EGL_image "
-        "GL_OES_fbo_render_mipmap GL_OES_stencil8 GL_KHR_debug "
-        "GL_EXT_unpack_subimage GL_EXT_read_format_bgra";
+        "GL_OES_vertex_array_object GL_OES_mapbuffer GL_OES_EGL_image "
+        "GL_EXT_texture_format_BGRA8888 GL_EXT_read_format_bgra";
     uint32_t in = name;
     char buf[4096];
     memset(buf, 0, sizeof(buf));
@@ -571,19 +618,10 @@ const GLubyte *glGetStringi(GLenum name, GLuint index)
         "GL_EXT_blend_minmax",
         "GL_EXT_discard_framebuffer",
         "GL_OES_compressed_ETC1_RGB8_texture",
-        "GL_EXT_texture_filter_anisotropic",
-        "GL_EXT_shader_framebuffer_fetch",
         "GL_OES_vertex_array_object",
         "GL_OES_mapbuffer",
-        "GL_EXT_map_buffer_range",
-        "GL_EXT_multi_draw_arrays",
-        "GL_OES_texture_3D",
-        "GL_OES_get_program_binary",
         "GL_OES_EGL_image",
-        "GL_OES_fbo_render_mipmap",
-        "GL_OES_stencil8",
-        "GL_KHR_debug",
-        "GL_EXT_unpack_subimage",
+        "GL_EXT_texture_format_BGRA8888",
         "GL_EXT_read_format_bgra",
         NULL,
     };
@@ -647,14 +685,19 @@ static int gl_limit_pname(GLenum pname)
 
 static int get_local_int(GLenum pname, GLint *params)
 {
+    static unsigned geom_logs;
     if (!params)
         return 1;
     switch (pname) {
     case 0x0BA2: /* VIEWPORT */
         memcpy(params, st_viewport, 16);
+        if (getenv("GUACAMELEE_XPORT_DIAG") && geom_logs++ < 8)
+            fprintf(stderr, "GUA-GEOM get GL_VIEWPORT -> %d,%d,%d,%d\\n", params[0], params[1], params[2], params[3]);
         return 1;
     case 0x0C10: /* SCISSOR_BOX */
         memcpy(params, st_scissor, 16);
+        if (getenv("GUACAMELEE_XPORT_DIAG") && geom_logs++ < 8)
+            fprintf(stderr, "GUA-GEOM get GL_SCISSOR_BOX -> %d,%d,%d,%d\\n", params[0], params[1], params[2], params[3]);
         return 1;
     case 0x84E0: /* ACTIVE_TEXTURE */
         params[0] = (GLint)(0x84C0 + active_tex);
@@ -1065,6 +1108,27 @@ void glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format,
     tspgl_call(OP_glReadPixels, hdr, 24, pixels, nb);
 }
 
+static int vao_diag_enabled(void)
+{
+    const char *v;
+    if (vao_diag >= 0)
+        return vao_diag;
+    v = getenv("GUACAMELEE_VAO_DIAG");
+    vao_diag = v && strcmp(v, "0") != 0;
+    return vao_diag;
+}
+
+static void vao_diag_log(const char *kind, uint32_t a, uint32_t b,
+                         uint32_t c, const void *ptr)
+{
+    if ((!vao_diag_enabled() && !bound_vao) || vao_diag_calls >= 256)
+        return;
+    fprintf(stderr,
+            "GUA-VAO n=%u kind=%s vao=%u array=%u element=%u a=%u b=%u c=%u "
+            "ptr=%p\\n", vao_diag_calls++, kind, bound_vao, bound_array,
+            bound_element, a, b, c, ptr);
+}
+
 void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
                            GLboolean normalized, GLsizei stride,
                            const void *ptr)
@@ -1078,12 +1142,16 @@ void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
     attribs[index].stride = stride;
     attribs[index].ptr = (uint32_t)(uintptr_t)ptr;
     attribs[index].is_offset = bound_array != 0;
+    attribs[index].source_buffer = bound_array;
+    if (current_vao)
+        current_vao->attrib[index] = attribs[index];
     u[0] = index;
     u[1] = (uint32_t)size;
     u[2] = type;
     u[3] = normalized;
     u[4] = (uint32_t)stride;
     u[5] = attribs[index].is_offset ? attribs[index].ptr : 0xffffffffu;
+    vao_diag_log("attrib", index, (uint32_t)size, type, ptr);
     tspgl_call(OP_glVertexAttribPointer, u, 24, NULL, 0);
 }
 
@@ -1093,17 +1161,16 @@ static void send_client_arrays(GLint first, GLsizei count)
     if (bound_vao)
         return;
     for (i = 0; i < 16; ++i) {
-        unsigned stride, start, nb;
+        unsigned stride, start, nb, elem;
         const uint8_t *src;
         uint8_t *buf;
         uint32_t hdr[4];
         if (!attribs[i].enabled || attribs[i].is_offset)
             continue;
-        stride = attribs[i].stride
-                     ? (unsigned)attribs[i].stride
-                     : (unsigned)attribs[i].size * type_bytes(attribs[i].type);
+        elem = (unsigned)attribs[i].size * type_bytes(attribs[i].type);
+        stride = attribs[i].stride ? (unsigned)attribs[i].stride : elem;
         start = (unsigned)first * stride;
-        nb = (unsigned)count * stride;
+        nb = count > 0 ? ((unsigned)(count - 1) * stride + elem) : 0;
         if (!nb)
             continue;
         src = (const uint8_t *)(uintptr_t)attribs[i].ptr;
@@ -1162,6 +1229,8 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count)
 {
     uint32_t u[3] = { mode, (uint32_t)first, (uint32_t)count };
     int client = has_client_arrays();
+    vao_diag_log("draw-arrays", (uint32_t)mode, (uint32_t)first,
+                 (uint32_t)count, NULL);
     send_client_arrays(first, count);
     if (client)
         u[1] = 0;
@@ -1172,10 +1241,12 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx)
 {
     uint32_t hdr[4];
     unsigned esize = type_bytes(type);
-    int indexed = (bound_element || bound_vao);
+    int indexed = (bound_element != 0);
     unsigned nb = indexed ? 0 : (unsigned)count * esize;
     uint8_t *buf;
     unsigned verts = (unsigned)count;
+    vao_diag_log("draw-elements", (uint32_t)mode, (uint32_t)count,
+                 (uint32_t)type, idx);
     if (!indexed && idx)
         verts = max_index_value(count, type, idx) + 1u;
     send_client_arrays(0, (GLsizei)verts);
@@ -1456,6 +1527,13 @@ GLboolean glUnmapBuffer(GLenum target)
 void glBindVertexArray(GLuint array)
 {
     uint32_t u = array;
+    current_vao = find_vao(array, 1);
+    if (current_vao) {
+        memcpy(attribs, current_vao->attrib, sizeof(attribs));
+        bound_element = current_vao->element_buffer;
+    } else {
+        bound_element = 0;
+    }
     bound_vao = array;
     tspgl_call(OP_glBindVertexArray, &u, 4, NULL, 0);
 }
@@ -1483,24 +1561,33 @@ void glBindBuffer(GLenum target, GLuint buffer)
     uint32_t u[2] = { target, buffer };
     if (target == GL_ARRAY_BUFFER)
         bound_array = buffer;
-    if (target == GL_ELEMENT_ARRAY_BUFFER)
+    if (target == GL_ELEMENT_ARRAY_BUFFER) {
         bound_element = buffer;
+        if (current_vao)
+            current_vao->element_buffer = buffer;
+    }
     tspgl_call(OP_glBindBuffer, u, 8, NULL, 0);
 }
 
 void glEnableVertexAttribArray(GLuint index)
 {
     uint32_t u = index;
-    if (index < 16)
+    if (index < 16) {
         attribs[index].enabled = 1;
+        if (current_vao)
+            current_vao->attrib[index].enabled = 1;
+    }
     tspgl_call(OP_glEnableVertexAttribArray, &u, 4, NULL, 0);
 }
 
 void glDisableVertexAttribArray(GLuint index)
 {
     uint32_t u = index;
-    if (index < 16)
+    if (index < 16) {
         attribs[index].enabled = 0;
+        if (current_vao)
+            current_vao->attrib[index].enabled = 0;
+    }
     tspgl_call(OP_glDisableVertexAttribArray, &u, 4, NULL, 0);
 }
 
@@ -2007,9 +2094,9 @@ unsigned eglQuerySurface(void *dpy, void *surf, int attr, int *value)
     if (!value)
         return 0;
     if (attr == EGL_WIDTH)
-        *value = tspgl_dimension("TSPGL_WIDTH", 640);
+        *value = tspgl_dimension("TSPGL_WIDTH", 1024);
     else if (attr == EGL_HEIGHT)
-        *value = tspgl_dimension("TSPGL_HEIGHT", 480);
+        *value = tspgl_dimension("TSPGL_HEIGHT", 768);
     else
         *value = 0;
     return 1;

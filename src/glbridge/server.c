@@ -22,6 +22,139 @@
 
 struct tspgl_api G;
 
+static int gl_diag = -1;
+static int gl_diag_lifecycle = -1;
+static unsigned gl_diag_ops;
+static int gl_diag_link;
+static int gl_diag_use;
+static int gl_diag_draw;
+static int gl_diag_swap;
+
+static int gl_diag_enabled(void)
+{
+    const char *v;
+
+    if (gl_diag >= 0)
+        return gl_diag;
+    v = getenv("GUACAMELEE_GL_DIAG");
+    gl_diag = v && strcmp(v, "0") != 0;
+    return gl_diag;
+}
+
+static int gl_diag_lifecycle_enabled(void)
+{
+    const char *v;
+
+    if (gl_diag_lifecycle >= 0)
+        return gl_diag_lifecycle && gl_diag_enabled();
+    v = getenv("GUACAMELEE_FBO_LIFECYCLE");
+    gl_diag_lifecycle = v && strcmp(v, "0") != 0;
+    return gl_diag_lifecycle && gl_diag_enabled();
+}
+
+static const char *gl_diag_op_name(uint32_t op)
+{
+    switch (op) {
+    case OP_glBindFramebuffer: return "glBindFramebuffer";
+    case OP_glBindRenderbuffer: return "glBindRenderbuffer";
+    case OP_glCheckFramebufferStatus: return "glCheckFramebufferStatus";
+    case OP_glFramebufferRenderbuffer: return "glFramebufferRenderbuffer";
+    case OP_glFramebufferTexture2D: return "glFramebufferTexture2D";
+    case OP_glRenderbufferStorage: return "glRenderbufferStorage";
+    case OP_glTexImage2D: return "glTexImage2D";
+    case OP_glDeleteRenderbuffers: return "glDeleteRenderbuffers";
+    case OP_glDeleteTextures: return "glDeleteTextures";
+    case OP_glGetIntegerv: return "glGetIntegerv";
+    case OP_glGetString: return "glGetString";
+    case OP_glCreateShader: return "glCreateShader";
+    case OP_glShaderSource: return "glShaderSource";
+    case OP_glCompileShader: return "glCompileShader";
+    case OP_glLinkProgram: return "glLinkProgram";
+    case OP_glUseProgram: return "glUseProgram";
+    case OP_glDrawArrays: return "glDrawArrays";
+    case OP_glDrawElements: return "glDrawElements";
+    case OP_glGetShaderiv: return "glGetShaderiv";
+    case OP_glGetProgramiv: return "glGetProgramiv";
+    case OP_glClear: return "glClear";
+    case OP_glGenerateMipmap: return "glGenerateMipmap";
+    case OP_glGetError: return "glGetError";
+    case OP_glGetFramebufferAttachmentParameteriv:
+        return "glGetFramebufferAttachmentParameteriv";
+    case OP_glGetRenderbufferParameteriv: return "glGetRenderbufferParameteriv";
+    case OP_glGetUniformLocation: return "glGetUniformLocation";
+    case OP_glUniform1f: return "glUniform1f";
+    case OP_glUniform1i: return "glUniform1i";
+    case OP_glUniformMatrix4fv: return "glUniformMatrix4fv";
+    case OP_glReadPixels: return "glReadPixels";
+    default: return "other";
+    }
+}
+
+static void gl_diag_op(uint32_t op, uint32_t len)
+{
+    if (!gl_diag_enabled() || gl_diag_ops >= 128)
+        return;
+    fprintf(stderr, "GUA-GL op#%u %s(%u) len=%u\n", gl_diag_ops++,
+            gl_diag_op_name(op), op, len);
+}
+
+static unsigned gl_diag_fbo_ops;
+
+static int gl_diag_is_fbo_op(uint32_t op)
+{
+    switch (op) {
+    case OP_glBindFramebuffer:
+    case OP_glBindRenderbuffer:
+    case OP_glCheckFramebufferStatus:
+    case OP_glFramebufferRenderbuffer:
+    case OP_glFramebufferTexture2D:
+    case OP_glCopyTexImage2D:
+    case OP_glRenderbufferStorage:
+    case OP_glGenFramebuffers:
+    case OP_glGenRenderbuffers:
+    case OP_glGetFramebufferAttachmentParameteriv:
+    case OP_glGetRenderbufferParameteriv:
+    case OP_glTexImage2D:
+    case OP_glDeleteRenderbuffers:
+    case OP_glDeleteTextures:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static void gl_diag_fbo_call(uint32_t op, const uint8_t *in, uint32_t len)
+{
+    uint32_t a[5] = {0, 0, 0, 0, 0};
+    unsigned n, i;
+
+    if (!gl_diag_enabled() || !gl_diag_is_fbo_op(op) ||
+        gl_diag_fbo_ops >= 256)
+        return;
+    n = len / 4u;
+    if (n > 5)
+        n = 5;
+    for (i = 0; i < n; ++i)
+        memcpy(&a[i], in + i * 4u, 4);
+    fprintf(stderr,
+            "GUA-FBO call#%u op=%u len=%u a0=0x%x a1=0x%x a2=%d a3=%d a4=%d\n",
+            gl_diag_fbo_ops++, op, len, a[0], a[1], (int32_t)a[2],
+            (int32_t)a[3], (int32_t)a[4]);
+}
+
+static void gl_diag_fbo_result(uint32_t op, const uint8_t *out,
+                               uint32_t out_n, int rc)
+{
+    uint32_t v = 0;
+
+    if (!gl_diag_enabled() || !gl_diag_is_fbo_op(op))
+        return;
+    if (out && out_n >= 4)
+        memcpy(&v, out, 4);
+    fprintf(stderr, "GUA-FBO result op=%u rc=%d out_n=%u value=0x%x\n",
+            op, rc, out_n, v);
+}
+
 #define SDL_INIT_VIDEO 0x00000020u
 #define SDL_INIT_JOYSTICK 0x00000200u
 #define SDL_INIT_GAMECONTROLLER 0x00002000u
@@ -41,9 +174,20 @@ struct tspgl_api G;
 #define SDL_GL_CONTEXT_PROFILE_MASK 21
 #define SDL_GL_CONTEXT_PROFILE_ES 4
 
+#define SDL_GL_SHARE_WITH_CURRENT_CONTEXT 22
 #define GL_TEXTURE_2D 0x0DE1
 #define GL_TEXTURE_CUBE_MAP 0x8513
 #define GL_RGBA 0x1908
+#define GL_DEBUG_OUTPUT 0x92E0
+#define GL_DEBUG_OUTPUT_SYNCHRONOUS 0x8242
+#define GL_DONT_CARE 0x1100
+#define GL_BACK 0x0405
+#define GL_READ_BUFFER 0x0C02
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
+#define GL_CURRENT_PROGRAM 0x8B8D
+#define GL_ACTIVE_TEXTURE 0x84E0
+#define GL_PACK_ALIGNMENT 0x0D05
 #define GL_UNSIGNED_BYTE 0x1401
 #define GL_TEXTURE_MIN_FILTER 0x2801
 #define GL_TEXTURE_MAG_FILTER 0x2800
@@ -56,8 +200,29 @@ struct tspgl_api G;
 #define GL_STENCIL_ATTACHMENT 0x8D20
 #define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
 #define GL_FRAMEBUFFER_BINDING 0x8CA6
+#define GL_RENDERBUFFER_BINDING 0x8CA7
+#define GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME 0x8CD1
+#define GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL 0x8CD2
 #define GL_READ_FRAMEBUFFER 0x8CA8
 #define GL_DRAW_FRAMEBUFFER 0x8CA9
+#define GL_DRAW_BUFFER0 0x8825
+#define GL_READ_BUFFER 0x0C02
+#define GL_BLEND_EQUATION_RGB 0x8009
+#define GL_BLEND_SRC_RGB 0x80C9
+#define GL_BLEND_DST_RGB 0x80C8
+#define GL_DEPTH_FUNC 0x0B74
+#define GL_DEPTH_WRITEMASK 0x0B72
+#define GL_DEPTH_RANGE 0x0B70
+#define GL_STENCIL_TEST 0x0B90
+#define GL_STENCIL_FUNC 0x0B92
+#define GL_STENCIL_REF 0x0B97
+#define GL_STENCIL_VALUE_MASK 0x0B93
+#define GL_STENCIL_WRITEMASK 0x0B98
+#define GL_STENCIL_FAIL 0x0B94
+#define GL_STENCIL_PASS_DEPTH_FAIL 0x0B95
+#define GL_STENCIL_PASS_DEPTH_PASS 0x0B96
+#define GL_CULL_FACE_MODE 0x0B45
+#define GL_FRONT_FACE 0x0B46
 #define GL_COLOR_BUFFER_BIT 0x4000
 #define GL_NEAREST 0x2600
 #define GL_DEPTH_COMPONENT16 0x81A5
@@ -66,6 +231,7 @@ struct tspgl_api G;
 #define GL_UNSIGNED_INT_24_8 0x84FA
 #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
 #define GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE 0x8CD0
+#define GL_TEXTURE 0x1702
 #define GL_NONE 0
 #define GL_SCISSOR_TEST 0x0C11
 #define GL_COLOR_WRITEMASK 0x0C23
@@ -78,6 +244,7 @@ struct tspgl_api G;
 #define GL_TEXTURE_WRAP_T 0x2803
 #define GL_TEXTURE_MAX_LEVEL 0x813D
 #define GL_RGB 0x1907
+#define GL_STATIC_DRAW 0x88E4
 #define GL_ARRAY_BUFFER 0x8892
 #define GL_TRIANGLE_STRIP 0x0005
 #define GL_FLOAT 0x1406
@@ -110,6 +277,7 @@ struct sdl_api {
     int (*init)(uint32_t);
     void (*quit)(void);
     const char *(*get_error)(void);
+    const char *(*get_current_video_driver)(void);
     int (*set_hint)(const char *, const char *);
     void *(*create_window)(const char *, int, int, int, int, uint32_t);
     void (*destroy_window)(void *);
@@ -134,23 +302,56 @@ struct sdl_api {
 static struct sdl_api sdl;
 static void *window;
 static void *glctx;
+static void *present_ctx;
+static uint32_t present_vao;
+static uint32_t present_vbo;
 static void *pad;
 static uint8_t *frame_map;
 static int frame_fd = -1;
 static int listen_fd = -1;
 
-int game_w = 640;
-int game_h = 480;
+int game_w = 1024;
+int game_h = 768;
+static int rb_zero_size;
+static int fbo_texture_fallback;
+static int unify_depth_stencil;
+static int rb_format_fix;
+static uint32_t depth_stencil_rb;
 int win_w = 1280;
 int win_h = 720;
 static int present_letterbox;
+static int present_last_fbo;
+static int present_set_read_buffer;
+static int present_hold_swap;
+static unsigned char fbo_live[4096];
+static int fbo_census_enabled = -1;
+static unsigned fbo_census_count;
+static int fbo_transition_trace = -1;
+static unsigned fbo_transition_budget;
+static unsigned fbo_transition_min_swap = 100;
+static unsigned char fbo_transition_valid[4096];
+static unsigned fbo_transition_prev_nonblack[4096];
+static uint64_t fbo_transition_prev_hash[4096];
+static unsigned char fbo_transition_done[4096];
+static unsigned fbo_transition_window_ops[4096];
+static unsigned fbo_transition_until_swap[4096];
+static unsigned char fbo_transition_full_done[4096];
 uint32_t game_fbo;
-uint32_t game_color;
+static uint32_t game_color;
+static int presenter_shared = -1;
+static uint8_t *present_upload_pixels;
 uint32_t game_depth;
 static void (*real_bind_fb)(uint32_t, uint32_t);
 static void (*real_get_integerv)(uint32_t, int32_t *);
 static uint32_t (*real_check_fb)(uint32_t);
 static void (*real_draw_buffers)(int32_t, const uint32_t *);
+static void (*real_read_buffer)(uint32_t);
+static int depth_only_read_none;
+static int zero_viewport;
+static int aspect_viewport_fix;
+static unsigned aspect_viewport_fix_hits;
+static unsigned gl_diag_lifecycle_ops;
+static uint32_t gl_diag_last_draw_fb;
 static void (*real_tex_image)(uint32_t, int32_t, int32_t, int32_t, int32_t,
                               int32_t, uint32_t, uint32_t, const void *);
 static void (*real_tex_parami)(uint32_t, uint32_t, int32_t);
@@ -166,9 +367,67 @@ static void (*real_tex_paramf)(uint32_t, uint32_t, float);
 static int splash_live;
 static uint32_t splash_tex;
 static uint32_t splash_prog;
+static uint32_t present_prog;
 static int32_t splash_loc_pos;
 static int32_t splash_loc_uv;
+static int32_t present_loc_pos;
+static int32_t present_loc_uv;
 
+typedef void (*tspgl_debug_callback)(uint32_t, uint32_t, uint32_t,
+                                      uint32_t, int32_t, const char *,
+                                      const void *);
+static int khr_debug_enabled;
+static unsigned khr_seq;
+static uint32_t khr_op;
+static uint32_t khr_args[6];
+static uint32_t khr_arg_count;
+static uint32_t khr_fb;
+static uint32_t khr_prog;
+
+typedef struct {
+    unsigned seq;
+    uint32_t op;
+    uint32_t args[6];
+    uint32_t fb;
+    uint32_t prog;
+    uint32_t active_tex;
+    uint32_t tex2d;
+} op_ring_entry;
+static op_ring_entry op_ring[64];
+static unsigned op_ring_next;
+static unsigned op_ring_count;
+static unsigned op_ring_dumps;
+static int pixel_probe_enabled;
+static unsigned pixel_swap_count;
+static int pixel_dump_enabled;
+static char pixel_dump_trigger_path[256];
+static unsigned pixel_dump_trigger_swap;
+static int fbo_transition_diag = -1;
+static uint32_t fbo_transition_prev[64];
+static int gl_error_trace = -1;
+static uint32_t deferred_gl_error;
+static unsigned gl_error_trace_count;
+static int title_draw_probe = -1;
+static unsigned title_draw_probe_count;
+static int title_state_diag = -1;
+static unsigned title_full_probe_count;
+static unsigned char title_program_dumped[256];
+static int title_occlusion_diag = -1;
+static unsigned title_occlusion_count;
+static uint32_t title_occlusion_query;
+static int title_occlusion_active;
+static int title_white_tex_diag = -1;
+static uint32_t title_white_tex;
+static int title_white_tex_active;
+static int32_t title_white_old_active;
+static int32_t title_white_old_binding;
+static int title_white_color_diag = -1;
+static int title_white_color_active;
+static int32_t title_white_color_loc;
+static int32_t title_white_color_enabled;
+static float title_white_color_old[4];
+static int swap_finish;
+static int swap_interval;
 static uint32_t now_ms(void)
 {
     struct timespec ts;
@@ -250,6 +509,99 @@ static void tspgl_stage_flip(void)
 #include "server_gen.c"
 #include "server_gl.c"
 
+static void fbo_format_matrix(void)
+{
+    const char *v = getenv("GUACAMELEE_FBO_FORMAT_MATRIX");
+    void (*gen_fb)(int32_t, uint32_t *) = (void *)G.glGenFramebuffers;
+    void (*del_fb)(int32_t, const uint32_t *) = (void *)G.glDeleteFramebuffers;
+    void (*bind_fb)(uint32_t, uint32_t) = (void *)G.glBindFramebuffer;
+    void (*gen_rb)(int32_t, uint32_t *) = (void *)G.glGenRenderbuffers;
+    void (*del_rb)(int32_t, const uint32_t *) = (void *)G.glDeleteRenderbuffers;
+    void (*bind_rb)(uint32_t, uint32_t) = (void *)G.glBindRenderbuffer;
+    void (*rb_storage)(uint32_t, uint32_t, int32_t, int32_t) =
+        (void *)G.glRenderbufferStorage;
+    void (*fb_rb)(uint32_t, uint32_t, uint32_t, uint32_t) =
+        (void *)G.glFramebufferRenderbuffer;
+    void (*gen_tex)(int32_t, uint32_t *) = (void *)G.glGenTextures;
+    void (*del_tex)(int32_t, const uint32_t *) = (void *)G.glDeleteTextures;
+    void (*bind_tex)(uint32_t, uint32_t) = (void *)G.glBindTexture;
+    void (*tex_image)(uint32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
+                      uint32_t, uint32_t, const void *) = (void *)G.glTexImage2D;
+    void (*fb_tex)(uint32_t, uint32_t, uint32_t, uint32_t, int32_t) =
+        (void *)G.glFramebufferTexture2D;
+    uint32_t (*check_fb)(uint32_t) = (void *)G.glCheckFramebufferStatus;
+    uint32_t (*get_error)(void) = (void *)G.glGetError;
+    uint32_t fbo, color_tex, color_rb, depth_rb, stencil_rb;
+    int32_t e_storage, e_attach;
+
+    if (!v || atoi(v) == 0 || !gen_fb || !del_fb || !bind_fb || !gen_rb ||
+        !del_rb || !bind_rb || !rb_storage || !fb_rb || !gen_tex ||
+        !del_tex || !bind_tex || !tex_image || !fb_tex || !check_fb ||
+        !get_error)
+        return;
+
+#define MATRIX_ROW(name, color_kind, packed, combined, with_stencil) do {                 \
+        color_tex = color_rb = depth_rb = stencil_rb = 0;                    \
+        gen_fb(1, &fbo); bind_fb(GL_FRAMEBUFFER, fbo);                      \
+        if (color_kind == 0) {                                               \
+            gen_tex(1, &color_tex); bind_tex(GL_TEXTURE_2D, color_tex);     \
+            tex_image(GL_TEXTURE_2D, 0, GL_RGBA, 1024, 768, 0, GL_RGBA,     \
+                      GL_UNSIGNED_BYTE, NULL);                               \
+            e_storage = (int32_t)get_error();                                \
+            fb_tex(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,      \
+                   color_tex, 0);                                             \
+        } else {                                                              \
+            gen_rb(1, &color_rb); bind_rb(GL_RENDERBUFFER, color_rb);       \
+            rb_storage(GL_RENDERBUFFER, 0x8056, 1024, 768);                  \
+            e_storage = (int32_t)get_error();                                \
+            fb_rb(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,     \
+                  color_rb);                                                  \
+        }                                                                         \
+        e_attach = (int32_t)get_error();                                    \
+        gen_rb(1, &depth_rb); bind_rb(GL_RENDERBUFFER, depth_rb);            \
+        rb_storage(GL_RENDERBUFFER, (packed) ? GL_DEPTH24_STENCIL8 :         \
+                   GL_DEPTH_COMPONENT16, 1024, 768);                         \
+        e_storage = (e_storage << 16) | (int32_t)(get_error() & 0xffff);     \
+        fb_rb(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,          \
+              depth_rb);                                                       \
+        if (combined) fb_rb(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,     \
+                            GL_RENDERBUFFER, depth_rb);                       \
+        e_attach = (e_attach << 16) | (int32_t)(get_error() & 0xffff);       \
+        if (!packed && with_stencil) {                                                         \
+            gen_rb(1, &stencil_rb); bind_rb(GL_RENDERBUFFER, stencil_rb);    \
+            rb_storage(GL_RENDERBUFFER, 0x8D48, 1024, 768);                  \
+            e_storage = (e_storage << 16) | (int32_t)(get_error() & 0xffff); \
+            fb_rb(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER,    \
+                  stencil_rb);                                                \
+            e_attach = (e_attach << 16) | (int32_t)(get_error() & 0xffff);   \
+        } else if (!combined) {                                                \
+            fb_rb(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER,    \
+                  depth_rb);                                                   \
+            e_attach = (e_attach << 16) | (int32_t)(get_error() & 0xffff);   \
+        }                                                                       \
+        fprintf(stderr, "GUA-FBO-MATRIX %s storage=0x%x attach=0x%x "        \
+                "status=0x%x depth_rb=%u stencil_rb=%u\\n", name,          \
+                (unsigned)e_storage, (unsigned)e_attach,                   \
+                check_fb(GL_FRAMEBUFFER), depth_rb,                          \
+                packed ? depth_rb : (stencil_rb));                           \
+        if (color_kind == 0) del_tex(1, &color_tex);                         \
+        if (color_kind != 0) del_rb(1, &color_rb);                            \
+        if (!packed && with_stencil) del_rb(1, &stencil_rb);                                  \
+        del_rb(1, &depth_rb); del_fb(1, &fbo);                                \
+    } while (0)
+
+    MATRIX_ROW("M1 color=RGBA depth=D16", 0, 0, 0, 0);
+    MATRIX_ROW("M2 color=RGBA depth=D16 stencil=S8", 0, 0, 0, 1);
+    MATRIX_ROW("M3 color=RGBA packed=D24S8 separate", 0, 1, 0, 0);
+    MATRIX_ROW("M3b color=RGBA packed=D24S8 combined", 0, 1, 1, 0);
+    MATRIX_ROW("M4 color=RGBA4 depth=D16 stencil=S8", 1, 0, 0, 1);
+    MATRIX_ROW("M5 color=RGBA4 packed=D24S8 separate", 1, 1, 0, 0);
+    MATRIX_ROW("M5b color=RGBA4 packed=D24S8 combined", 1, 1, 1, 0);
+#undef MATRIX_ROW
+    bind_fb(GL_FRAMEBUFFER, 0);
+    fprintf(stderr, "GUA-FBO-MATRIX done\\n");
+}
+
 static int load_sdl(void)
 {
     const char *candidates[] = {
@@ -281,6 +633,7 @@ static int load_sdl(void)
     LOAD(init, "SDL_Init");
     LOAD(quit, "SDL_Quit");
     LOAD(get_error, "SDL_GetError");
+    LOAD_OPT(get_current_video_driver, "SDL_GetCurrentVideoDriver");
     LOAD(set_hint, "SDL_SetHint");
     LOAD(create_window, "SDL_CreateWindow");
     LOAD(destroy_window, "SDL_DestroyWindow");
@@ -313,6 +666,110 @@ static void *gl_get(const char *name)
     if (!p)
         p = dlsym(RTLD_DEFAULT, name);
     return p;
+}
+
+static void khr_debug_cb(uint32_t source, uint32_t type, uint32_t id,
+                         uint32_t severity, int32_t length,
+                         const char *message, const void *user)
+{
+    int n = length;
+    (void)user;
+    if (n < 0 || n > 512)
+        n = 512;
+    fprintf(stderr,
+            "GUA-KHRDBG seq=%u op=%s/%u fb=%u prog=%u source=0x%x "
+            "type=0x%x id=%u severity=0x%x args=%u,%u,%u,%u,%u,%u msg=%.*s\\n",
+            khr_seq, gl_diag_op_name(khr_op), khr_op, khr_fb, khr_prog,
+            source, type, id, severity, khr_args[0], khr_args[1], khr_args[2],
+            khr_args[3], khr_args[4], khr_args[5], n,
+            message ? message : "");
+}
+
+static void khr_debug_setup(void)
+{
+    const char *v = getenv("GUACAMELEE_KHR_DEBUG");
+    void (*callback)(tspgl_debug_callback, const void *);
+    void (*control)(uint32_t, uint32_t, uint32_t, int32_t,
+                    const uint32_t *, uint32_t);
+    void *cbp;
+    void *ctlp;
+
+    khr_debug_enabled = v && strcmp(v, "0") != 0;
+    if (!khr_debug_enabled)
+        return;
+    cbp = gl_get("glDebugMessageCallback");
+    ctlp = gl_get("glDebugMessageControl");
+    if (!cbp || !ctlp) {
+        cbp = gl_get("glDebugMessageCallbackKHR");
+        ctlp = gl_get("glDebugMessageControlKHR");
+    }
+    if (!cbp || !ctlp) {
+        fprintf(stderr, "GUA-KHRDBG unavailable callback=%p control=%p\\n",
+                cbp, ctlp);
+        return;
+    }
+    callback = (void (*)(tspgl_debug_callback, const void *))cbp;
+    control = (void (*)(uint32_t, uint32_t, uint32_t, int32_t,
+                        const uint32_t *, uint32_t))ctlp;
+    callback(khr_debug_cb, NULL);
+    control(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, 1);
+    if (G.glEnable) {
+        G.glEnable(GL_DEBUG_OUTPUT);
+        G.glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+    }
+    fprintf(stderr, "GUA-KHRDBG enabled callback=%p control=%p\\n", cbp, ctlp);
+}
+
+static void op_ring_capture(uint32_t seq, uint32_t op, const uint8_t *in,
+                            uint32_t len)
+{
+    op_ring_entry *e;
+    unsigned i, n;
+    int32_t x;
+    const char *v = getenv("GUACAMELEE_OP_RING");
+    if (!v || strcmp(v, "0") == 0)
+        return;
+    e = &op_ring[op_ring_next];
+    memset(e, 0, sizeof(*e));
+    e->seq = seq;
+    e->op = op;
+    n = len / 4u;
+    if (n > 6)
+        n = 6;
+    for (i = 0; i < n; ++i)
+        memcpy(&e->args[i], in + i * 4u, 4);
+    if (real_get_integerv) {
+        real_get_integerv(GL_FRAMEBUFFER_BINDING, &x);
+        e->fb = x > 0 ? (uint32_t)x : 0;
+        real_get_integerv(GL_CURRENT_PROGRAM, &x);
+        e->prog = x > 0 ? (uint32_t)x : 0;
+        real_get_integerv(GL_ACTIVE_TEXTURE, &x);
+        e->active_tex = x > 0 ? (uint32_t)x : 0;
+        real_get_integerv(GL_TEXTURE_BINDING_2D, &x);
+        e->tex2d = x > 0 ? (uint32_t)x : 0;
+    }
+    op_ring_next = (op_ring_next + 1u) % 64u;
+    if (op_ring_count < 64u)
+        op_ring_count++;
+}
+
+static void op_ring_dump(uint32_t error)
+{
+    unsigned start, i;
+    if (error != 0x0502 || op_ring_dumps >= 8 || !op_ring_count)
+        return;
+    start = (op_ring_next + 64u - op_ring_count) % 64u;
+    fprintf(stderr, "GUA-RING error=0x%x count=%u dump=%u\\n", error,
+            op_ring_count, op_ring_dumps++);
+    for (i = 0; i < op_ring_count; ++i) {
+        op_ring_entry *e = &op_ring[(start + i) % 64u];
+        fprintf(stderr,
+                "GUA-RING seq=%u op=%s/%u args=%u,%u,%u,%u,%u,%u "
+                "fb=%u prog=%u active=0x%x tex2d=%u\\n",
+                e->seq, gl_diag_op_name(e->op), e->op, e->args[0], e->args[1],
+                e->args[2], e->args[3], e->args[4], e->args[5], e->fb,
+                e->prog, e->active_tex, e->tex2d);
+    }
 }
 
 static uint8_t *open_frame(void)
@@ -458,10 +915,14 @@ static int create_game_fbo(void)
 
 static uint32_t wrap_check_fb(uint32_t target)
 {
+    static unsigned wrap_diag;
     uint32_t st;
     if (!real_check_fb)
         return 0;
     st = real_check_fb(target);
+    if (gl_diag_enabled() && wrap_diag < 32)
+        fprintf(stderr, "GUA-FBO wrap-check#%u target=0x%x initial=0x%x\\n",
+                wrap_diag++, target, st);
     if (st == GL_FRAMEBUFFER_COMPLETE)
         return st;
     if (real_draw_buffers) {
@@ -477,11 +938,20 @@ static uint32_t wrap_check_fb(uint32_t target)
         if (get_att) {
             get_att(target, GL_COLOR_ATTACHMENT0,
                     GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &color_type);
+            if (gl_diag_enabled() && wrap_diag < 32)
+                fprintf(stderr,
+                        "GUA-FBO wrap-color-type=0x%x target=0x%x\\n",
+                        (unsigned)color_type, target);
             if (color_type != (int32_t)GL_NONE)
                 return st;
         }
+        if (depth_only_read_none && real_read_buffer)
+            real_read_buffer(GL_NONE);
         real_draw_buffers(1, &none);
         st = real_check_fb(target);
+        if (gl_diag_enabled() && wrap_diag < 32)
+            fprintf(stderr, "GUA-FBO wrap-after-none=0x%x target=0x%x\\n",
+                    st, target);
         if (st == GL_FRAMEBUFFER_COMPLETE) {
             static int once;
             if (!once) {
@@ -491,10 +961,752 @@ static uint32_t wrap_check_fb(uint32_t target)
             }
             return st;
         }
+        if (depth_only_read_none && real_read_buffer)
+            real_read_buffer(GL_COLOR_ATTACHMENT0);
         real_draw_buffers(1, &color);
         st = real_check_fb(target);
     }
     return st;
+}
+
+static void gl_diag_fbo_lifecycle(uint32_t op, const uint8_t *in,
+                                  uint32_t len)
+{
+    uint32_t u[5] = {0, 0, 0, 0, 0};
+    int32_t fb = 0, rb = 0, prog = 0, vp[4] = {0, 0, 0, 0};
+    unsigned i, n;
+
+    if (!gl_diag_lifecycle_enabled() || gl_diag_lifecycle_ops >= 2000 ||
+        (!gl_diag_is_fbo_op(op) && op != OP_glDrawArrays &&
+         op != OP_glDrawElements))
+        return;
+    n = len / 4u;
+    if (n > 5)
+        n = 5;
+    for (i = 0; i < n; ++i)
+        memcpy(&u[i], in + i * 4u, 4);
+    if (real_get_integerv) {
+        real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+        real_get_integerv(GL_RENDERBUFFER_BINDING, &rb);
+        real_get_integerv(GL_CURRENT_PROGRAM, &prog);
+    }
+    if (op == OP_glBindFramebuffer) {
+        fprintf(stderr, "GUA-FBO bind-fb requested=%u actual=%d\\n",
+                u[1], (int)fb);
+    } else if (op == OP_glBindRenderbuffer) {
+        fprintf(stderr, "GUA-FBO bind-rb requested=%u actual=%d\\n",
+                u[1], (int)rb);
+    } else if (op == OP_glCopyTexImage2D && real_get_integerv) {
+        int32_t tex = 0;
+        real_get_integerv(GL_TEXTURE_BINDING_2D, &tex);
+        fprintf(stderr,
+                "GUA-TEX copy fb=%d tex=%d target=0x%x level=%d "
+                "ifmt=0x%x xy=%d,%d size=%dx%d border=%d\\n",
+                (int)fb, (int)tex, u[0], (int32_t)u[1], u[2],
+                (int32_t)u[3], (int32_t)u[4], (int32_t)u[5],
+                (int32_t)u[6], (int32_t)u[7]);
+    } else if (op == OP_glRenderbufferStorage && G.glGetRenderbufferParameteriv) {
+        int32_t w = 0, h = 0, fmt = 0;
+        void (*get_rb)(uint32_t, uint32_t, int32_t *) =
+            (void *)G.glGetRenderbufferParameteriv;
+        get_rb(GL_RENDERBUFFER, 0x8D42, &w);
+        get_rb(GL_RENDERBUFFER, 0x8D43, &h);
+        get_rb(GL_RENDERBUFFER, 0x8D44, &fmt);
+        fprintf(stderr,
+                "GUA-FBO rb-state fb=%d rb=%d fmt=0x%x requested=%dx%d actual=%dx%d internal=0x%x\\n",
+                (int)fb, (int)rb, u[1], (int32_t)u[2], (int32_t)u[3],
+                (int)w, (int)h, (unsigned)fmt);
+    } else if (op == OP_glFramebufferRenderbuffer ||
+               op == OP_glFramebufferTexture2D) {
+        int32_t type = 0, name = 0, level = 0;
+        void (*get_att)(uint32_t, uint32_t, uint32_t, int32_t *) =
+            (void *)G.glGetFramebufferAttachmentParameteriv;
+        if (get_att) {
+            get_att(GL_FRAMEBUFFER, u[1], GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                    &type);
+            get_att(GL_FRAMEBUFFER, u[1], GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+                    &name);
+            if (type == (int32_t)GL_TEXTURE)
+                get_att(GL_FRAMEBUFFER, u[1], GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL,
+                        &level);
+        }
+        fprintf(stderr,
+                "GUA-FBO attachment fb=%d slot=0x%x type=0x%x name=%d level=%d\\n",
+                (int)fb, u[1], (unsigned)type, (int)name, (int)level);
+    } else if (op == OP_glCheckFramebufferStatus && real_check_fb) {
+        fprintf(stderr, "GUA-FBO status fb=%d status=0x%x\\n", (int)fb,
+                real_check_fb(GL_FRAMEBUFFER));
+    } else if (op == OP_glDrawArrays || op == OP_glDrawElements) {
+        if (real_get_integerv)
+            real_get_integerv(GL_VIEWPORT, vp);
+        gl_diag_last_draw_fb = (uint32_t)fb;
+        fprintf(stderr, "GUA-DRAW fb=%d program=%d viewport=%d,%d,%d,%d op=%s\\n",
+                (int)fb, (int)prog, vp[0], vp[1], vp[2], vp[3],
+                op == OP_glDrawArrays ? "DrawArrays" : "DrawElements");
+    }
+    gl_diag_lifecycle_ops++;
+}
+
+static int gl_error_trace_enabled(void)
+{
+    const char *v;
+    if (gl_error_trace >= 0)
+        return gl_error_trace;
+    v = getenv("GUACAMELEE_GL_ERROR_TRACE");
+    gl_error_trace = v && strcmp(v, "0") != 0;
+    return gl_error_trace;
+}
+
+static void gl_error_trace_after(uint32_t op, uint32_t seq)
+{
+    uint32_t (*get_error)(void);
+    uint32_t err;
+    int32_t fb = 0, prog = 0;
+    if (!gl_error_trace_enabled() || op == OP_glGetError ||
+        !G.glGetError || gl_error_trace_count >= 256)
+        return;
+    get_error = (void *)G.glGetError;
+    err = get_error();
+    if (!err)
+        return;
+    if (real_get_integerv) {
+        real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+        real_get_integerv(GL_CURRENT_PROGRAM, &prog);
+    }
+    fprintf(stderr, "GUA-GL-ERR seq=%u op=%s/%u fb=%d prog=%d error=0x%x\\n",
+            seq, gl_diag_op_name(op), op, (int)fb, (int)prog, err);
+    ++gl_error_trace_count;
+    deferred_gl_error = err;
+}
+
+#define GL_ACTIVE_UNIFORMS 0x8B86
+#define GL_ATTACHED_SHADERS 0x8B85
+#define GL_SHADER_TYPE 0x8B4F
+#define GL_ANY_SAMPLES_PASSED 0x8C2F
+#define GL_QUERY_RESULT 0x8866
+
+static int title_occlusion_begin(uint32_t op)
+{
+    const char *v;
+    int32_t fb = 0;
+    void (*gen)(int32_t, uint32_t *) = (void *)gl_get("glGenQueries");
+    void (*begin)(uint32_t, uint32_t) = (void *)gl_get("glBeginQuery");
+
+    if (title_occlusion_diag < 0) {
+        v = getenv("GUACAMELEE_TITLE_OCCLUSION_DIAG");
+        title_occlusion_diag = v && strcmp(v, "0") != 0;
+    }
+    if (!title_occlusion_diag || title_occlusion_count >= 16 ||
+        title_occlusion_active ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !gen || !begin)
+        return 0;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (fb != 2)
+        return 0;
+    if (!title_occlusion_query)
+        gen(1, &title_occlusion_query);
+    if (!title_occlusion_query)
+        return 0;
+    begin(GL_ANY_SAMPLES_PASSED, title_occlusion_query);
+    title_occlusion_active = 1;
+    return 1;
+}
+
+static void title_occlusion_end(uint32_t seq)
+{
+    void (*end)(uint32_t) = (void *)gl_get("glEndQuery");
+    void (*get)(uint32_t, uint32_t, uint32_t *) = (void *)gl_get("glGetQueryObjectuiv");
+    uint32_t passed = 0;
+    if (!title_occlusion_active || !end || !get)
+        return;
+    end(GL_ANY_SAMPLES_PASSED);
+    get(title_occlusion_query, GL_QUERY_RESULT, &passed);
+    fprintf(stderr, "GUA-TITLE-OCCLUSION seq=%u passed=%u\\n", seq,
+            passed ? 1u : 0u);
+    ++title_occlusion_count;
+    title_occlusion_active = 0;
+}
+
+static void gl_title_program_dump(uint32_t program)
+{
+    int32_t n = 0;
+    int32_t i;
+    void (*getiv)(uint32_t, uint32_t, int32_t *) = (void *)G.glGetProgramiv;
+    void (*getactive)(uint32_t, uint32_t, int32_t, int32_t *, int32_t *,
+                      uint32_t *, char *) = (void *)G.glGetActiveUniform;
+    int32_t (*getloc)(uint32_t, const char *) = (void *)G.glGetUniformLocation;
+    void (*getuniform)(uint32_t, int32_t, int32_t *) = (void *)G.glGetUniformiv;
+    void (*getuniformfv)(uint32_t, int32_t, float *) = (void *)G.glGetUniformfv;
+    void (*getattached)(uint32_t, int32_t, int32_t *, uint32_t *) =
+        (void *)G.glGetAttachedShaders;
+    void (*shaderiv)(uint32_t, uint32_t, int32_t *) = (void *)G.glGetShaderiv;
+    void (*getsource)(uint32_t, int32_t, int32_t *, char *) =
+        (void *)G.glGetShaderSource;
+    if (!program || program >= 256 || title_program_dumped[program] ||
+        !getiv || !getactive || !getloc || !getuniform)
+        return;
+    title_program_dumped[program] = 1;
+    getiv(program, GL_ACTIVE_UNIFORMS, &n);
+    if (n < 0) n = 0;
+    if (n > 32) n = 32;
+    fprintf(stderr, "GUA-TITLE-PROG program=%u uniforms=%d\\n", program, n);
+    for (i = 0; i < n; ++i) {
+        char name[128] = {0};
+        int32_t size = 0, loc, value = 0, value_valid = 0;
+        int32_t values[64] = {0};
+        float fvalues[16] = {0};
+        int float_valid = 0;
+        uint32_t type = 0;
+        getactive(program, (uint32_t)i, sizeof(name), NULL, &size, &type, name);
+        loc = getloc(program, name);
+        if (loc >= 0 && (type == 0x8b5e || type == 0x8b5f ||
+                         type == 0x8b60 || type == 0x8b61 ||
+                         type == 0x8b62 || type == 0x8b63 ||
+                         type == 0x8b64 || type == 0x8b65 ||
+                         type == 0x1404 || type == 0x8b56 ||
+                         type == 0x8b53 || type == 0x8b57)) {
+            getuniform(program, loc, values);
+            value = values[0];
+            value_valid = 1;
+        } else if (loc >= 0 && getuniformfv &&
+                   (type == 0x8b50 || type == 0x8b51 || type == 0x8b52 ||
+                    type == 0x8b53 || type == 0x8b5b || type == 0x8b5c ||
+                    type == 0x8b5d)) {
+            getuniformfv(program, loc, fvalues);
+            float_valid = 1;
+        }
+        fprintf(stderr,
+                "GUA-TITLE-UNIFORM program=%u index=%d name=%s loc=%d "
+                "size=%d type=0x%x ivalue=%d ivalid=%d "
+                "f=%g,%g,%g,%g fvalid=%d\\n",
+                program, i, name, loc, size, type, value, value_valid,
+                fvalues[0], fvalues[1], fvalues[2], fvalues[3], float_valid);
+    }
+    if (getattached && shaderiv && getsource) {
+        uint32_t shaders[8] = {0};
+        int32_t count = 0;
+        getattached(program, 8, &count, shaders);
+        if (count > 8) count = 8;
+        for (i = 0; i < count; ++i) {
+            int32_t type = 0, length = 0;
+            char source[4096] = {0};
+            shaderiv(shaders[i], GL_SHADER_TYPE, &type);
+            getsource(shaders[i], (int32_t)sizeof(source) - 1, &length, source);
+            if (length < 0) length = 0;
+            if (length >= (int32_t)sizeof(source)) length = sizeof(source) - 1;
+            source[length] = 0;
+            fprintf(stderr, "GUA-TITLE-SHADER program=%u shader=%u type=0x%x bytes=%d\\n%s\\n",
+                    program, shaders[i], type, length, source);
+        }
+    }
+}
+
+static void gl_title_full_probe(const char *stage, uint32_t fb,
+                                int width, int height, uint32_t seq);
+
+static void gl_diag_pre_draw_finish(uint32_t op, uint32_t seq)
+{
+    static int finish_enabled = -1, pre_enabled = -1;
+    int32_t fb = 0, program = 0;
+    const char *v;
+    if (finish_enabled < 0) {
+        v = getenv("GUACAMELEE_PRE_DRAW_FINISH");
+        finish_enabled = v && strcmp(v, "0") != 0;
+    }
+    if (pre_enabled < 0) {
+        v = getenv("GUACAMELEE_PREDRAW_DIAG");
+        pre_enabled = v && strcmp(v, "0") != 0;
+    }
+    if ((!finish_enabled && !pre_enabled) ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    if (fb == 1 && program == 18 && seq >= 7000) {
+        if (pre_enabled)
+            gl_title_full_probe("fbo1-pre", 1, game_w, game_h, seq);
+        if (finish_enabled && G.glFinish) {
+            fprintf(stderr, "GUA-PRE-FINISH seq=%u fb=%d program=%d\\n",
+                    seq, fb, program);
+            G.glFinish();
+        }
+    }
+}
+
+static void gl_title_source_probe(uint32_t tex, uint32_t seq)
+{
+    static uint32_t probe_fb;
+    int32_t old_fb = 0;
+    uint8_t pixels[16 * 16 * 4];
+    unsigned i, nonblack = 0;
+    uint64_t hash = 1469598103934665603ULL;
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+    if (!tex || !real_get_integerv || !real_bind_fb ||
+        !G.glGenFramebuffers || !G.glFramebufferTexture2D ||
+        !G.glCheckFramebufferStatus || !read_pixels)
+        return;
+    if (!probe_fb)
+        G.glGenFramebuffers(1, &probe_fb);
+    if (!probe_fb)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &old_fb);
+    real_bind_fb(GL_FRAMEBUFFER, probe_fb);
+    G.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                             GL_TEXTURE_2D, tex, 0);
+    if (G.glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+        memset(pixels, 0, sizeof(pixels));
+        read_pixels(0, 0, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        for (i = 0; i < sizeof(pixels); ++i) {
+            hash ^= pixels[i];
+            hash *= 1099511628211ULL;
+            if ((i & 3u) != 3u && pixels[i] != 0)
+                ++nonblack;
+        }
+        fprintf(stderr, "GUA-TITLE-SOURCE seq=%u tex=%u nonblack=%u/768 "
+                "hash=%016llx\\n", seq, tex, nonblack,
+                (unsigned long long)hash);
+    } else {
+        fprintf(stderr, "GUA-TITLE-SOURCE seq=%u tex=%u incomplete\\n",
+                seq, tex);
+    }
+    real_bind_fb(GL_FRAMEBUFFER, (uint32_t)old_fb);
+}
+
+static void gl_title_texture_units(uint32_t program, uint32_t seq)
+{
+    int32_t old_active = 0, bindings[4] = {0};
+    unsigned i;
+    if (!real_get_integerv || !G.glActiveTexture)
+        return;
+    real_get_integerv(GL_ACTIVE_TEXTURE, &old_active);
+    for (i = 0; i < 4; ++i) {
+        G.glActiveTexture(GL_TEXTURE0 + i);
+        real_get_integerv(GL_TEXTURE_BINDING_2D, &bindings[i]);
+    }
+    G.glActiveTexture((uint32_t)old_active);
+    fprintf(stderr,
+            "GUA-TITLE-TEX seq=%u prog=%u active=0x%x unit0=%d unit1=%d "
+            "unit2=%d unit3=%d\\n", seq, program, old_active,
+            bindings[0], bindings[1], bindings[2], bindings[3]);
+    if (program == 18 && G.glGetAttribLocation && G.glGetVertexAttribiv &&
+        G.glGetVertexAttribfv) {
+        int32_t (*getloc)(uint32_t, const char *) =
+            (void *)G.glGetAttribLocation;
+        void (*getiv)(uint32_t, uint32_t, int32_t *) =
+            (void *)G.glGetVertexAttribiv;
+        void (*getfv)(uint32_t, uint32_t, float *) =
+            (void *)G.glGetVertexAttribfv;
+        const char *names[] = {"in_position0", "in_colour0", "in_texcoord0"};
+        unsigned n;
+        for (n = 0; n < 3; ++n) {
+            int32_t loc = getloc(program, names[n]);
+            int32_t enabled = -1, size = -1, type = -1, stride = -1, buffer = -1;
+            float value[4] = {0};
+            if (loc >= 0) {
+                getiv((uint32_t)loc, 0x8622, &enabled);
+                getiv((uint32_t)loc, 0x8623, &size);
+                getiv((uint32_t)loc, 0x8625, &type);
+                getiv((uint32_t)loc, 0x8624, &stride);
+                getiv((uint32_t)loc, 0x889f, &buffer);
+                getfv((uint32_t)loc, 0x8626, value);
+            }
+            fprintf(stderr, "GUA-TITLE-ATTR seq=%u name=%s loc=%d enabled=%d "
+                    "size=%d type=0x%x stride=%d buffer=%d "
+                    "value=%g,%g,%g,%g\\n", seq, names[n], loc, enabled,
+                    size, type, stride, buffer, value[0], value[1], value[2],
+                    value[3]);
+        }
+    }
+}
+
+static int title_white_color_begin(uint32_t op, uint32_t seq)
+{
+    const char *v;
+    int32_t fb = 0, program = 0;
+    int32_t (*getloc)(uint32_t, const char *) = (void *)G.glGetAttribLocation;
+    void (*getiv)(uint32_t, uint32_t, int32_t *) = (void *)G.glGetVertexAttribiv;
+    void (*getfv)(uint32_t, uint32_t, float *) = (void *)G.glGetVertexAttribfv;
+    void (*disable)(uint32_t) = (void *)G.glDisableVertexAttribArray;
+    void (*set4f)(uint32_t, float, float, float, float) = (void *)G.glVertexAttrib4f;
+
+    if (title_white_color_diag < 0) {
+        v = getenv("GUACAMELEE_TITLE_WHITE_COLOR");
+        title_white_color_diag = v && atoi(v) != 0;
+    }
+    if (!title_white_color_diag || title_white_color_active ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !getloc || !getiv || !getfv || !disable || !set4f)
+        return 0;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    if (fb != 2 || program != 2)
+        return 0;
+    title_white_color_loc = getloc((uint32_t)program, "in_colour0");
+    if (title_white_color_loc < 0)
+        return 0;
+    getiv((uint32_t)title_white_color_loc, 0x8622, &title_white_color_enabled);
+    getfv((uint32_t)title_white_color_loc, 0x8626, title_white_color_old);
+    if (title_white_color_enabled)
+        disable((uint32_t)title_white_color_loc);
+    set4f((uint32_t)title_white_color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
+    fprintf(stderr, "GUA-TITLE-WHITE-COLOR seq=%u loc=%d enabled=%d\\n",
+            seq, (int)title_white_color_loc, (int)title_white_color_enabled);
+    title_white_color_active = 1;
+    return 1;
+}
+
+static void title_white_color_end(void)
+{
+    void (*enable)(uint32_t) = (void *)G.glEnableVertexAttribArray;
+    void (*disable)(uint32_t) = (void *)G.glDisableVertexAttribArray;
+    void (*set4f)(uint32_t, float, float, float, float) = (void *)G.glVertexAttrib4f;
+    if (!title_white_color_active || !enable || !disable || !set4f)
+        return;
+    set4f((uint32_t)title_white_color_loc,
+          title_white_color_old[0], title_white_color_old[1],
+          title_white_color_old[2], title_white_color_old[3]);
+    if (title_white_color_enabled)
+        enable((uint32_t)title_white_color_loc);
+    else
+        disable((uint32_t)title_white_color_loc);
+    title_white_color_active = 0;
+}
+
+static int title_white_texture_begin(uint32_t op, uint32_t seq)
+{
+    const char *v;
+    int32_t fb = 0, program = 0;
+    void (*gen)(int32_t, uint32_t *) = (void *)G.glGenTextures;
+    void (*bind)(uint32_t, uint32_t) = (void *)G.glBindTexture;
+    void (*active)(uint32_t) = (void *)G.glActiveTexture;
+    void (*parami)(uint32_t, uint32_t, int32_t) = (void *)G.glTexParameteri;
+    void (*image)(uint32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
+                  uint32_t, uint32_t, const void *) = (void *)G.glTexImage2D;
+    static const uint8_t white[4] = {255, 255, 255, 255};
+
+    if (title_white_tex_diag < 0) {
+        v = getenv("GUACAMELEE_TITLE_WHITE_TEX");
+        title_white_tex_diag = v && atoi(v) != 0;
+    }
+    if (!title_white_tex_diag || title_white_tex_active ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !active || !bind || !gen || !parami || !image)
+        return 0;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    if (fb != 2 || program != 2)
+        return 0;
+    real_get_integerv(GL_ACTIVE_TEXTURE, &title_white_old_active);
+    active(GL_TEXTURE0);
+    real_get_integerv(GL_TEXTURE_BINDING_2D, &title_white_old_binding);
+    if (!title_white_tex)
+        gen(1, &title_white_tex);
+    if (!title_white_tex)
+        goto restore;
+    bind(GL_TEXTURE_2D, title_white_tex);
+    parami(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    parami(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    parami(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    parami(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    image(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+    fprintf(stderr, "GUA-TITLE-WHITE-TEX seq=%u old=%d diag=%u\\n",
+            seq, title_white_old_binding, title_white_tex);
+    title_white_tex_active = 1;
+    return 1;
+restore:
+    bind(GL_TEXTURE_2D, (uint32_t)title_white_old_binding);
+    active((uint32_t)title_white_old_active);
+    return 0;
+}
+
+static void title_white_texture_end(void)
+{
+    void (*bind)(uint32_t, uint32_t) = (void *)G.glBindTexture;
+    void (*active)(uint32_t) = (void *)G.glActiveTexture;
+    if (!title_white_tex_active || !bind || !active)
+        return;
+    active(GL_TEXTURE0);
+    bind(GL_TEXTURE_2D, (uint32_t)title_white_old_binding);
+    active((uint32_t)title_white_old_active);
+    title_white_tex_active = 0;
+}
+
+static void gl_title_full_probe(const char *stage, uint32_t fb,
+                                int width, int height, uint32_t seq)
+{
+    uint8_t *pixels;
+    int32_t old_fb = 0;
+    int x, y;
+    unsigned nonblack = 0;
+    unsigned minv = 255, maxv = 0;
+    int minx = width, miny = height, maxx = -1, maxy = -1;
+    uint64_t hash = 1469598103934665603ULL;
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+
+    if (!real_get_integerv || !real_bind_fb || !read_pixels ||
+        width <= 0 || height <= 0)
+        return;
+    pixels = malloc((size_t)width * (size_t)height * 4u);
+    if (!pixels)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &old_fb);
+    real_bind_fb(GL_FRAMEBUFFER, fb);
+    read_pixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    for (y = 0; y < height; ++y) {
+        for (x = 0; x < width; ++x) {
+            const uint8_t *p = pixels + ((size_t)y * (size_t)width + (size_t)x) * 4u;
+            unsigned c;
+            int pixel_nonblack = 0;
+            for (c = 0; c < 3; ++c) {
+                if (p[c]) pixel_nonblack = 1;
+                if (p[c] < minv) minv = p[c];
+                if (p[c] > maxv) maxv = p[c];
+                hash ^= p[c];
+                hash *= 1099511628211ULL;
+            }
+            if (pixel_nonblack) {
+                ++nonblack;
+                if (x < minx) minx = x;
+                if (x > maxx) maxx = x;
+                if (y < miny) miny = y;
+                if (y > maxy) maxy = y;
+            }
+        }
+    }
+    real_bind_fb(GL_FRAMEBUFFER, (uint32_t)old_fb);
+    fprintf(stderr,
+            "GUA-TITLE-FULL stage=%s seq=%u fb=%u hash=%016llx "
+            "nonblack=%u/%u min=%u max=%u bbox=%d,%d..%d,%d\\n",
+            stage, seq, fb, (unsigned long long)hash, nonblack,
+            (unsigned)(width * height), minv, maxv,
+            minx < width ? minx : -1, miny < height ? miny : -1,
+            maxx, maxy);
+    free(pixels);
+}
+
+static void gl_title_state_snapshot(uint32_t op, const uint8_t *in,
+                                    uint32_t len, uint32_t seq)
+{
+    const char *v;
+    int32_t fb = 0, status = 0, drawbuf = 0, readbuf = 0;
+    int32_t vp[4] = {0}, sc[4] = {0}, color[4] = {0};
+    int32_t blend = 0, blend_eq = 0, blend_src = 0, blend_dst = 0;
+    int32_t depth = 0, depth_func = 0, depth_write = 0;
+    int32_t stencil = 0, stencil_func = 0, stencil_ref = 0;
+    int32_t stencil_value = 0, stencil_write = 0, cull = 0;
+    int32_t cull_face = 0, front_face = 0, program = 0;
+    unsigned mode = 0, count = 0, type = 0, idx = 0;
+
+    if (title_state_diag < 0) {
+        v = getenv("GUACAMELEE_TITLE_STATE_DIAG");
+        title_state_diag = v && strcmp(v, "0") != 0;
+    }
+    if (!title_state_diag ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !real_check_fb)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (fb != 2 && !(getenv("GUACAMELEE_TITLE_STATE_ALL") && fb == 1))
+        return;
+    status = (int32_t)real_check_fb(GL_FRAMEBUFFER);
+    real_get_integerv(GL_DRAW_BUFFER0, &drawbuf);
+    real_get_integerv(GL_READ_BUFFER, &readbuf);
+    real_get_integerv(GL_VIEWPORT, vp);
+    real_get_integerv(GL_SCISSOR_BOX, sc);
+    real_get_integerv(GL_COLOR_WRITEMASK, color);
+    real_get_integerv(GL_BLEND, &blend);
+    real_get_integerv(GL_BLEND_EQUATION_RGB, &blend_eq);
+    real_get_integerv(GL_BLEND_SRC_RGB, &blend_src);
+    real_get_integerv(GL_BLEND_DST_RGB, &blend_dst);
+    real_get_integerv(GL_DEPTH_TEST, &depth);
+    real_get_integerv(GL_DEPTH_FUNC, &depth_func);
+    real_get_integerv(GL_DEPTH_WRITEMASK, &depth_write);
+    real_get_integerv(GL_STENCIL_TEST, &stencil);
+    real_get_integerv(GL_STENCIL_FUNC, &stencil_func);
+    real_get_integerv(GL_STENCIL_REF, &stencil_ref);
+    real_get_integerv(GL_STENCIL_VALUE_MASK, &stencil_value);
+    real_get_integerv(GL_STENCIL_WRITEMASK, &stencil_write);
+    real_get_integerv(GL_CULL_FACE, &cull);
+    real_get_integerv(GL_CULL_FACE_MODE, &cull_face);
+    real_get_integerv(GL_FRONT_FACE, &front_face);
+    real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    if (fb == 1 && program != 18)
+        return;
+    if (len >= 12) {
+        memcpy(&mode, in, 4);
+        if (op == OP_glDrawArrays)
+            memcpy(&count, in + 8, 4);
+        else
+            memcpy(&count, in + 4, 4);
+    }
+    if (op == OP_glDrawElements && len >= 16) {
+        memcpy(&type, in + 8, 4);
+        memcpy(&idx, in + 12, 4);
+    }
+    fprintf(stderr,
+            "GUA-TITLE-STATE seq=%u fb=%d status=0x%x drawbuf=0x%x "
+            "readbuf=0x%x prog=%d op=%s mode=0x%x count=%u type=0x%x idx=0x%x "
+            "vp=%d,%d,%d,%d scissor=%d box=%d,%d,%d,%d color=%d%d%d%d "
+            "blend=%d eq=0x%x src=0x%x dst=0x%x depth=%d func=0x%x write=%d "
+            "stencil=%d func=0x%x ref=%d value=0x%x write=0x%x "
+            "cull=%d face=0x%x front=0x%x\\n",
+            seq, fb, status, drawbuf, readbuf, program,
+            op == OP_glDrawArrays ? "DrawArrays" : "DrawElements",
+            mode, count, type, idx, vp[0], vp[1], vp[2], vp[3],
+            G.glIsEnabled ? G.glIsEnabled(GL_SCISSOR_TEST) : -1,
+            sc[0], sc[1], sc[2], sc[3], color[0], color[1], color[2], color[3],
+            blend, blend_eq, blend_src, blend_dst, depth, depth_func,
+            depth_write, stencil, stencil_func, stencil_ref, stencil_value,
+            stencil_write, cull, cull_face, front_face);
+}
+
+static void gl_title_draw_probe(uint32_t op, uint32_t seq)
+{
+    const char *v;
+    int32_t fb = 0;
+    int32_t program = 0;
+    uint8_t pixels[16 * 16 * 4];
+    unsigned i, nonblack = 0;
+    uint64_t hash = 1469598103934665603ULL;
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+
+    if (title_draw_probe < 0) {
+        v = getenv("GUACAMELEE_TITLE_DRAW_PROBE");
+        title_draw_probe = v && strcmp(v, "0") != 0;
+    }
+    if (!title_draw_probe || title_draw_probe_count >= 128 ||
+        (op != OP_glDrawArrays && op != OP_glDrawElements) ||
+        !real_get_integerv || !read_pixels)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (real_get_integerv)
+        real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    v = getenv("GUACAMELEE_TITLE_DRAW_ALL");
+    if (fb != 2 && !(v && strcmp(v, "0") != 0 &&
+                     (program == 28 || program == 18)))
+        return;
+    if (fb != 2)
+        gl_title_program_dump((uint32_t)program);
+    if (fb == 1 && program == 18 && seq >= 7000)
+        gl_title_full_probe("fbo1-draw", 1, game_w, game_h, seq);
+    {
+        if (real_get_integerv)
+            real_get_integerv(GL_CURRENT_PROGRAM, &program);
+        gl_title_program_dump((uint32_t)program);
+        gl_title_texture_units((uint32_t)program, seq);
+        if (fb == 1 && program == 18 && seq >= 7000 && G.glActiveTexture) {
+            int32_t old_active = 0, tex = 0;
+            real_get_integerv(GL_ACTIVE_TEXTURE, &old_active);
+            G.glActiveTexture(GL_TEXTURE0);
+            real_get_integerv(GL_TEXTURE_BINDING_2D, &tex);
+            G.glActiveTexture((uint32_t)old_active);
+            gl_title_source_probe((uint32_t)tex, seq);
+        }
+    }
+    memset(pixels, 0, sizeof(pixels));
+    read_pixels(0, 0, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    for (i = 0; i < sizeof(pixels); ++i) {
+        hash ^= pixels[i];
+        hash *= 1099511628211ULL;
+        if ((i & 3u) != 3u && pixels[i] != 0)
+            ++nonblack;
+    }
+    {
+        unsigned draw_index = title_draw_probe_count++;
+        fprintf(stderr, "GUA-TITLE-PIX draw=%u seq=%u op=%s fb=%d nonblack=%u/768 "
+                "hash=%016llx\\n", draw_index, seq,
+                op == OP_glDrawArrays ? "DrawArrays" : "DrawElements", (int)fb,
+                nonblack, (unsigned long long)hash);
+        if (draw_index == 15)
+            gl_title_full_probe("draw16", 2, game_w, game_h, seq);
+    }
+}
+
+static void gl_diag_fbo_transition(uint32_t op, const uint8_t *in,
+                                    uint32_t len)
+{
+    static const uint32_t slots[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT,
+                                     GL_STENCIL_ATTACHMENT};
+    uint32_t a[8] = {0};
+    int32_t fb = 0, old_rb = 0;
+    uint32_t status, old;
+    unsigned i, n;
+    const char *v;
+    void (*get_att)(uint32_t, uint32_t, uint32_t, int32_t *) =
+        (void *)G.glGetFramebufferAttachmentParameteriv;
+    void (*get_rb)(uint32_t, uint32_t, int32_t *) =
+        (void *)G.glGetRenderbufferParameteriv;
+    void (*bind_rb)(uint32_t, uint32_t) = (void *)G.glBindRenderbuffer;
+
+    if (fbo_transition_diag < 0) {
+        v = getenv("GUACAMELEE_FBO_TRANSITION_DIAG");
+        fbo_transition_diag = v && strcmp(v, "0") != 0;
+    }
+    if (!fbo_transition_diag || !real_check_fb || !real_get_integerv ||
+        !get_att || !G.glGetRenderbufferParameteriv || !bind_rb ||
+        !gl_diag_is_fbo_op(op) ||
+        (op != OP_glFramebufferRenderbuffer &&
+         op != OP_glFramebufferTexture2D && op != OP_glRenderbufferStorage &&
+         op != OP_glTexImage2D && op != OP_glCopyTexImage2D &&
+         op != OP_glDeleteRenderbuffers && op != OP_glDeleteTextures))
+        return;
+    n = len / 4u;
+    if (n > 8u)
+        n = 8u;
+    for (i = 0; i < n; ++i)
+        memcpy(&a[i], in + i * 4u, 4u);
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (fb <= 0 || fb >= (int32_t)(sizeof(fbo_transition_prev) /
+                                    sizeof(fbo_transition_prev[0])))
+        return;
+    status = real_check_fb(GL_FRAMEBUFFER);
+    old = fbo_transition_prev[fb];
+    fbo_transition_prev[fb] = status;
+    if (old == status)
+        return;
+    real_get_integerv(GL_RENDERBUFFER_BINDING, &old_rb);
+    fprintf(stderr,
+            "GUA-FBO-TRANS seq=%u trigger=%s/%u args=%x,%x,%x,%x "
+            "fb=%d status=0x%x->0x%x ",
+            gl_diag_lifecycle_ops, gl_diag_op_name(op), op, a[0], a[1], a[2],
+            a[3], (int)fb, old, status);
+    for (i = 0; i < 3; ++i) {
+        int32_t type = 0, name = 0, w = 0, h = 0, fmt = 0;
+        get_att(GL_FRAMEBUFFER, slots[i], GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                &type);
+        get_att(GL_FRAMEBUFFER, slots[i], GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+                &name);
+        if (type == (int32_t)GL_RENDERBUFFER && name > 0) {
+            bind_rb(GL_RENDERBUFFER, (uint32_t)name);
+            get_rb(GL_RENDERBUFFER, 0x8D42, &w);
+            get_rb(GL_RENDERBUFFER, 0x8D43, &h);
+            get_rb(GL_RENDERBUFFER, 0x8D44, &fmt);
+        }
+        fprintf(stderr, "%s:type=0x%x id=%d size=%dx%d ifmt=0x%x ",
+                i == 0 ? "color" : (i == 1 ? "depth" : "stencil"),
+                (unsigned)type, (int)name, (int)w, (int)h, (unsigned)fmt);
+    }
+    if (old_rb > 0)
+        bind_rb(GL_RENDERBUFFER, (uint32_t)old_rb);
+    fprintf(stderr, "ds=%s\\n",
+            ({
+                int32_t dt = 0, st = 0, dn = 0, sn = 0;
+                get_att(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &dt);
+                get_att(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &st);
+                get_att(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &dn);
+                get_att(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &sn);
+                (dt == (int32_t)GL_RENDERBUFFER &&
+                 st == (int32_t)GL_RENDERBUFFER && dn == sn) ? "same" : "different";
+            }));
 }
 
 static void wrap_bind_fb(uint32_t target, uint32_t fb)
@@ -598,6 +1810,19 @@ static void wrap_tex_image2d(uint32_t target, int32_t level, int32_t ifmt,
 
     if (real_tex_image)
         real_tex_image(target, level, ifmt, w, h, border, format, type, pixels);
+    if (gl_diag_lifecycle_enabled() && level == 0) {
+        static unsigned tex_diag;
+        int32_t fb = 0;
+        if (real_get_integerv)
+            real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+        if (tex_diag < 256)
+            fprintf(stderr,
+                    "GUA-TEX image#%u fb=%d tex=%u target=0x%x "
+                    "level=%d requested=%dx%d ifmt=0x%x format=0x%x type=0x%x\\n",
+                    tex_diag++, (int)fb, bound_tex(param_target(target)), target,
+                    (int)level, (int)w, (int)h, (unsigned)ifmt,
+                    (unsigned)format, (unsigned)type);
+    }
     if (is_depth_internal(ifmt) && real_tex_parami)
         real_tex_parami(ptarget, GL_TEXTURE_COMPARE_MODE, (int32_t)GL_NONE);
     if (level != 0)
@@ -836,6 +2061,47 @@ static int splash_setup(void)
     return 0;
 }
 
+static int present_program_setup(void)
+{
+    int32_t linked = 0;
+    int32_t (*get_attr)(uint32_t, const char *) = (void *)gl_get("glGetAttribLocation");
+    int32_t (*get_uni)(uint32_t, const char *) = (void *)gl_get("glGetUniformLocation");
+    void (*get_prog)(uint32_t, uint32_t, int32_t *) = (void *)gl_get("glGetProgramiv");
+    uint32_t (*create_shader)(uint32_t) = (void *)gl_get("glCreateShader");
+    uint32_t (*create_program)(void) = (void *)gl_get("glCreateProgram");
+    void (*source)(uint32_t,int32_t,const char *const *,const int32_t *) = (void *)gl_get("glShaderSource");
+    void (*compile)(uint32_t) = (void *)gl_get("glCompileShader");
+    void (*attach)(uint32_t,uint32_t) = (void *)gl_get("glAttachShader");
+    void (*link)(uint32_t) = (void *)gl_get("glLinkProgram");
+    void (*use)(uint32_t) = (void *)gl_get("glUseProgram");
+    void (*uniform)(int32_t,int32_t) = (void *)gl_get("glUniform1i");
+    const char *v = splash_vs, *f = splash_fs;
+    uint32_t vs, fs;
+    if (present_prog || !create_shader || !create_program || !source || !compile ||
+        !attach || !link || !get_attr || !get_uni || !get_prog)
+        return present_prog ? 0 : -1;
+    vs = create_shader(GL_VERTEX_SHADER);
+    fs = create_shader(GL_FRAGMENT_SHADER);
+    if (!vs || !fs)
+        return -1;
+    source(vs, 1, &v, NULL); compile(vs);
+    source(fs, 1, &f, NULL); compile(fs);
+    present_prog = create_program();
+    if (!present_prog)
+        return -1;
+    attach(present_prog, vs); attach(present_prog, fs); link(present_prog);
+    get_prog(present_prog, GL_LINK_STATUS, &linked);
+    if (!linked)
+        return -1;
+    present_loc_pos = get_attr(present_prog, "a_pos");
+    present_loc_uv = get_attr(present_prog, "a_uv");
+    if (use) use(present_prog);
+    if (uniform) uniform(get_uni(present_prog, "u_tex"), 0);
+    fprintf(stderr, "GUA-PRESCTX-PROGRAM program=%u pos=%d uv=%d\\n",
+            present_prog, present_loc_pos, present_loc_uv);
+    return 0;
+}
+
 static void splash_present(void)
 {
     static const float quad[] = {
@@ -937,11 +2203,530 @@ static void present_draw_cursor(int dx, int dy, int dw, int dh)
         G.glDisable(GL_SCISSOR_TEST);
 }
 
+static void pixel_probe_target(const char *stage, uint32_t fb, int w, int h,
+                               unsigned swap)
+{
+    struct region { int x, y, w, h; } r[5];
+    uint8_t pixels[32 * 32 * 4];
+    uint64_t hash = 1469598103934665603ULL;
+    unsigned nonblack = 0, total = 0, i, j;
+    unsigned minv = 255, maxv = 0;
+    int32_t old_read = 0, old_draw = 0, old_buf = GL_BACK, old_pack = 4;
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+    void (*pixel_store)(uint32_t, int32_t) = (void *)G.glPixelStorei;
+
+    if (!pixel_probe_enabled || !read_pixels || !real_bind_fb || w < 32 || h < 32)
+        return;
+    if (real_get_integerv) {
+        real_get_integerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
+        real_get_integerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
+        real_get_integerv(GL_READ_BUFFER, &old_buf);
+        real_get_integerv(GL_PACK_ALIGNMENT, &old_pack);
+    }
+    r[0] = (struct region){w / 2 - 16, h / 2 - 16, 32, 32};
+    r[1] = (struct region){w / 4 - 8, h / 4 - 8, 16, 16};
+    r[2] = (struct region){3 * w / 4 - 8, h / 4 - 8, 16, 16};
+    r[3] = (struct region){w / 4 - 8, 3 * h / 4 - 8, 16, 16};
+    r[4] = (struct region){3 * w / 4 - 8, 3 * h / 4 - 8, 16, 16};
+    real_bind_fb(GL_READ_FRAMEBUFFER, fb);
+    if (real_read_buffer)
+        real_read_buffer(fb ? GL_COLOR_ATTACHMENT0 : GL_BACK);
+    if (pixel_store)
+        pixel_store(GL_PACK_ALIGNMENT, 1);
+    for (i = 0; i < 5; ++i) {
+        size_t bytes = (size_t)r[i].w * (size_t)r[i].h * 4u;
+        memset(pixels, 0, sizeof(pixels));
+        read_pixels(r[i].x, r[i].y, r[i].w, r[i].h, GL_RGBA,
+                    GL_UNSIGNED_BYTE, pixels);
+        for (j = 0; j < bytes; ++j) {
+            hash ^= pixels[j];
+            hash *= 1099511628211ULL;
+            if ((j & 3u) != 3u) {
+                if (pixels[j] != 0)
+                    nonblack++;
+                if (pixels[j] < minv)
+                    minv = pixels[j];
+                if (pixels[j] > maxv)
+                    maxv = pixels[j];
+                total++;
+            }
+        }
+    }
+    if (pixel_dump_enabled &&
+        (swap == 10 || swap == 600 || swap == pixel_dump_trigger_swap)) {
+        size_t full_bytes = (size_t)w * (size_t)h * 4u;
+        uint8_t *full = malloc(full_bytes);
+        if (full) {
+            char path[96];
+            FILE *ppm;
+            uint64_t full_hash = 1469598103934665603ULL;
+            size_t k;
+            read_pixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, full);
+            for (k = 0; k < full_bytes; ++k) {
+                full_hash ^= full[k];
+                full_hash *= 1099511628211ULL;
+            }
+            snprintf(path, sizeof(path), "/tmp/tspgl-pixel-%s.ppm", stage);
+            ppm = fopen(path, "wb");
+            if (ppm) {
+                int y;
+                fprintf(ppm, "P6\n%d %d\n255\n", w, h);
+                for (y = h - 1; y >= 0; --y) {
+                    int x;
+                    uint8_t *row = full + (size_t)y * (size_t)w * 4u;
+                    for (x = 0; x < w; ++x)
+                        fwrite(row + (size_t)x * 4u, 1u, 3u, ppm);
+                }
+                fclose(ppm);
+                fprintf(stderr, "GUA-PIX dump swap=%u stage=%s path=%s "
+                        "hash=%016llx\\n", swap, stage, path,
+                        (unsigned long long)full_hash);
+            }
+            free(full);
+        }
+    }
+    fprintf(stderr,
+            "GUA-PIX swap=%u stage=%s fb=%u size=%dx%d hash=%016llx "
+            "nonblack=%u/%u min=%u max=%u\\n", swap, stage, fb, w, h,
+            (unsigned long long)hash, nonblack, total, minv, maxv);
+    if (pixel_store)
+        pixel_store(GL_PACK_ALIGNMENT, old_pack);
+    if (real_read_buffer)
+        real_read_buffer((uint32_t)old_buf);
+    real_bind_fb(GL_READ_FRAMEBUFFER, old_read > 0 ? (uint32_t)old_read : 0);
+    real_bind_fb(GL_DRAW_FRAMEBUFFER, old_draw > 0 ? (uint32_t)old_draw : 0);
+}
+
+static int pixel_probe_swap(unsigned swap)
+{
+    if (pixel_dump_trigger_swap == swap)
+        return 1;
+    if (pixel_dump_trigger_swap && pixel_dump_trigger_swap != swap)
+        pixel_dump_trigger_swap = 0;
+    if (swap == 1 || swap == 2 || swap == 3 || swap == 10 || swap == 30 ||
+        swap == 300 || swap == 600)
+        return 1;
+    if (pixel_probe_enabled && pixel_dump_enabled &&
+        pixel_dump_trigger_path[0] && swap % 30u == 0u &&
+        access(pixel_dump_trigger_path, F_OK) == 0 &&
+        unlink(pixel_dump_trigger_path) == 0) {
+        pixel_dump_trigger_swap = swap;
+        fprintf(stderr, "GUA-PIX trigger accepted swap=%u\\n", swap);
+        return 1;
+    }
+    return 0;
+}
+
+static void fbo_census_track(uint32_t op, const uint8_t *in, uint32_t len,
+                             const uint8_t *out, uint32_t out_n)
+{
+    uint32_t i, count;
+    if (op == OP_glGenFramebuffers) {
+        count = out_n / 4u;
+        if (count > 256) count = 256;
+        for (i = 0; i < count; ++i) {
+            uint32_t id;
+            memcpy(&id, out + i * 4u, 4);
+            if (id < 4096) fbo_live[id] = 1;
+        }
+    } else if (op == OP_glDeleteFramebuffers && len >= 4) {
+        memcpy(&count, in, 4);
+        if (count > 256) count = 256;
+        if (4u + count * 4u > len) count = (len - 4u) / 4u;
+        for (i = 0; i < count; ++i) {
+            uint32_t id;
+            memcpy(&id, in + 4u + i * 4u, 4);
+            if (id < 4096) fbo_live[id] = 0;
+        }
+    }
+}
+
+static int fbo_census_checkpoint(unsigned swap)
+{
+    return swap == 10 || swap == 30 || swap == 50 || swap == 100 ||
+           swap == 150 || swap == 200 || swap == 250 || swap == 300 ||
+           swap == 500 || swap == 1000 || swap == 2000 || swap == 4000 ||
+           swap == 6000;
+}
+
+static void fbo_census(unsigned swap)
+{
+    int32_t old_read = 0, old_draw = 0, old_buf = GL_BACK, old_pack = 4;
+    void (*getatt)(uint32_t, uint32_t, uint32_t, int32_t *) =
+        (void *)G.glGetFramebufferAttachmentParameteriv;
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+    void (*pixel_store)(uint32_t, int32_t) = (void *)G.glPixelStorei;
+    unsigned id;
+    if (fbo_census_enabled < 0) {
+        const char *v = getenv("GUACAMELEE_FBO_CENSUS");
+        fbo_census_enabled = v && atoi(v) != 0;
+    }
+    if (!fbo_census_enabled || !fbo_census_checkpoint(swap) ||
+        fbo_census_count++ >= 16 || !real_bind_fb || !real_get_integerv ||
+        !real_check_fb || !getatt || !read_pixels)
+        return;
+    real_get_integerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
+    real_get_integerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
+    real_get_integerv(GL_READ_BUFFER, &old_buf);
+    real_get_integerv(GL_PACK_ALIGNMENT, &old_pack);
+    for (id = 1; id < 4096; ++id) {
+        int32_t status, type = 0, object = 0, drawbuf = 0, readbuf = 0;
+        struct { int x, y, w, h; } r[5];
+        uint8_t pixels[32 * 32 * 4];
+        unsigned n = 0, total = 0, k, j;
+        uint64_t hash = 1469598103934665603ULL;
+        if (!fbo_live[id] && id != game_fbo)
+            continue;
+        real_bind_fb(GL_FRAMEBUFFER, id);
+        status = (int32_t)real_check_fb(GL_FRAMEBUFFER);
+        if (getatt) {
+            getatt(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                   GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
+            getatt(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                   GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &object);
+        }
+        real_get_integerv(GL_DRAW_BUFFER0, &drawbuf);
+        real_get_integerv(GL_READ_BUFFER, &readbuf);
+        if (type == (int32_t)GL_TEXTURE && real_read_buffer && pixel_store) {
+            r[0] = (typeof(r[0])){game_w / 2 - 16, game_h / 2 - 16, 32, 32};
+            r[1] = (typeof(r[0])){game_w / 4 - 8, game_h / 4 - 8, 16, 16};
+            r[2] = (typeof(r[0])){3 * game_w / 4 - 8, game_h / 4 - 8, 16, 16};
+            r[3] = (typeof(r[0])){game_w / 4 - 8, 3 * game_h / 4 - 8, 16, 16};
+            r[4] = (typeof(r[0])){3 * game_w / 4 - 8, 3 * game_h / 4 - 8, 16, 16};
+            real_read_buffer(GL_COLOR_ATTACHMENT0);
+            pixel_store(GL_PACK_ALIGNMENT, 1);
+            for (j = 0; j < 5; ++j) {
+                size_t bytes = (size_t)r[j].w * (size_t)r[j].h * 4u;
+                memset(pixels, 0, sizeof(pixels));
+                read_pixels(r[j].x, r[j].y, r[j].w, r[j].h,
+                            GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                total += (unsigned)bytes - (unsigned)(r[j].w * r[j].h);
+                for (k = 0; k < bytes; ++k) {
+                    hash ^= pixels[k]; hash *= 1099511628211ULL;
+                    if ((k % 4u) < 3u && pixels[k]) ++n;
+                }
+            }
+        }
+        fprintf(stderr,
+                "GUA-FBO-CENSUS swap=%u ms=%llu fb=%u status=0x%x "
+                "color-type=0x%x color=%d drawbuf=0x%x readbuf=0x%x "
+                "nonblack=%u/%u hash=%016llx\\n", swap,
+                (unsigned long long)now_ms(), id, (unsigned)status,
+                (unsigned)type, (int)object, (unsigned)drawbuf,
+                (unsigned)readbuf, n, total, (unsigned long long)hash);
+    }
+    real_bind_fb(GL_READ_FRAMEBUFFER, (uint32_t)old_read);
+    real_bind_fb(GL_DRAW_FRAMEBUFFER, (uint32_t)old_draw);
+    if (real_read_buffer) real_read_buffer((uint32_t)old_buf);
+    if (pixel_store) pixel_store(GL_PACK_ALIGNMENT, old_pack);
+}
+
+static void fbo_transition_after(uint32_t op, const uint8_t *in,
+                                  uint32_t len, uint32_t seq)
+{
+    int32_t fb = 0, old_read = 0, old_draw = 0, old_buf = GL_BACK;
+    int32_t old_pack = 4;
+    int32_t program = 0, blend = 0, eq = 0, src = 0, dst = 0;
+    int32_t scissor = 0, sc[4] = {0};
+    int32_t color[4] = {0}, vp[4] = {0};
+    float clear[4] = {0};
+    void (*read_pixels)(int32_t, int32_t, int32_t, int32_t, uint32_t,
+                        uint32_t, void *) = (void *)G.glReadPixels;
+    void (*pixel_store)(uint32_t, int32_t) = (void *)G.glPixelStorei;
+    void (*get_floatv)(uint32_t, float *) = (void *)G.glGetFloatv;
+    uint8_t pixels[32 * 32 * 4];
+    struct { int x, y, w, h; } r[5];
+    unsigned n = 0, total = 0, j, k;
+    uint64_t hash = 1469598103934665603ULL;
+    uint32_t args[6] = {0};
+    const char *name;
+
+    if (fbo_transition_trace < 0) {
+        const char *v = getenv("GUACAMELEE_FBO_TRANSITION_TRACE");
+        const char *ms = getenv("GUACAMELEE_FBO_TRANSITION_MIN_SWAP");
+        fbo_transition_trace = v && atoi(v) != 0;
+        if (ms) {
+            int n = atoi(ms);
+            if (n >= 0) fbo_transition_min_swap = (unsigned)n;
+        }
+    }
+    if (!fbo_transition_trace ||
+        (op != OP_glClear && op != OP_glDrawArrays &&
+         op != OP_glDrawElements && op != OP_glBlitFramebuffer &&
+         op != OP_glCopyTexImage2D && op != OP_glCopyTexSubImage2D) ||
+        !real_get_integerv || !real_bind_fb || !real_read_buffer ||
+        !read_pixels || !pixel_store)
+        return;
+    real_get_integerv(GL_FRAMEBUFFER_BINDING, &fb);
+    if (fb != 2 && fb != 4)
+        return;
+    if (fbo_transition_budget++ >= 2048 ||
+        (fbo_transition_done[fb] &&
+         (fbo_transition_window_ops[fb] == 0 ||
+          pixel_swap_count > fbo_transition_until_swap[fb])))
+        return;
+    real_get_integerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
+    real_get_integerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
+    real_get_integerv(GL_READ_BUFFER, &old_buf);
+    real_get_integerv(GL_PACK_ALIGNMENT, &old_pack);
+    real_get_integerv(GL_CURRENT_PROGRAM, &program);
+    real_get_integerv(GL_BLEND, &blend);
+    real_get_integerv(GL_BLEND_EQUATION_RGB, &eq);
+    real_get_integerv(GL_BLEND_SRC_RGB, &src);
+    real_get_integerv(GL_BLEND_DST_RGB, &dst);
+    real_get_integerv(GL_COLOR_WRITEMASK, color);
+    real_get_integerv(GL_VIEWPORT, vp);
+    real_get_integerv(GL_SCISSOR_TEST, &scissor);
+    real_get_integerv(GL_SCISSOR_BOX, sc);
+    if (get_floatv && op == OP_glClear)
+        get_floatv(0x0c22, clear);
+    real_bind_fb(GL_READ_FRAMEBUFFER, (uint32_t)fb);
+    real_read_buffer(GL_COLOR_ATTACHMENT0);
+    pixel_store(GL_PACK_ALIGNMENT, 1);
+    r[0] = (typeof(r[0])){game_w / 2 - 16, game_h / 2 - 16, 32, 32};
+    r[1] = (typeof(r[0])){game_w / 4 - 8, game_h / 4 - 8, 16, 16};
+    r[2] = (typeof(r[0])){3 * game_w / 4 - 8, game_h / 4 - 8, 16, 16};
+    r[3] = (typeof(r[0])){game_w / 4 - 8, 3 * game_h / 4 - 8, 16, 16};
+    r[4] = (typeof(r[0])){3 * game_w / 4 - 8, 3 * game_h / 4 - 8, 16, 16};
+    for (j = 0; j < 5; ++j) {
+        size_t bytes = (size_t)r[j].w * (size_t)r[j].h * 4u;
+        memset(pixels, 0, sizeof(pixels));
+        read_pixels(r[j].x, r[j].y, r[j].w, r[j].h,
+                    GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        total += (unsigned)bytes - (unsigned)(r[j].w * r[j].h);
+        for (k = 0; k < bytes; ++k) {
+            hash ^= pixels[k]; hash *= 1099511628211ULL;
+            if ((k % 4u) < 3u && pixels[k]) ++n;
+        }
+    }
+    real_bind_fb(GL_READ_FRAMEBUFFER, (uint32_t)old_read);
+    real_bind_fb(GL_DRAW_FRAMEBUFFER, (uint32_t)old_draw);
+    real_read_buffer((uint32_t)old_buf);
+    pixel_store(GL_PACK_ALIGNMENT, old_pack);
+    if (fbo_transition_done[fb] && fbo_transition_window_ops[fb] > 0)
+        --fbo_transition_window_ops[fb];
+    if (pixel_swap_count < fbo_transition_min_swap) {
+        fbo_transition_valid[fb] = 1;
+        fbo_transition_prev_nonblack[fb] = n;
+        fbo_transition_prev_hash[fb] = hash;
+        return;
+    }
+    if (!fbo_transition_valid[fb]) {
+        fbo_transition_valid[fb] = 1;
+        fbo_transition_prev_nonblack[fb] = n;
+        fbo_transition_prev_hash[fb] = hash;
+        fprintf(stderr, "GUA-COLOR-SIG seq=%u ms=%llu fb=%d nonblack=%u hash=%016llx\\n",
+                seq, (unsigned long long)now_ms(), (int)fb, n,
+                (unsigned long long)hash);
+        return;
+    }
+    if (!fbo_transition_prev_nonblack[fb] && n) {
+        unsigned i;
+        for (i = 0; i < 6 && i * 4u + 4u <= len; ++i)
+            memcpy(&args[i], in + i * 4u, 4);
+        switch (op) {
+        case OP_glClear: name = "glClear"; break;
+        case OP_glDrawArrays: name = "glDrawArrays"; break;
+        case OP_glDrawElements: name = "glDrawElements"; break;
+        case OP_glBlitFramebuffer: name = "glBlitFramebuffer"; break;
+        case OP_glCopyTexImage2D: name = "glCopyTexImage2D"; break;
+        default: name = "other"; break;
+        }
+        fprintf(stderr,
+                "GUA-COLOR-SIG seq=%u ms=%llu fb=%d op=%s nonblack=%u "
+                "program=%d args=%u,%u,%u,%u,%u,%u hash=%016llx\\n",
+                seq, (unsigned long long)now_ms(), (int)fb, name, n,
+                (int)program, args[0], args[1], args[2], args[3], args[4],
+                args[5], (unsigned long long)hash);
+        if (!fbo_transition_full_done[fb]) {
+            gl_title_full_probe("post-clear", (uint32_t)fb, game_w, game_h, seq);
+            fbo_transition_full_done[fb] = 1;
+        }
+    }
+    if (fbo_transition_prev_nonblack[fb] && !n) {
+        unsigned i;
+        for (i = 0; i < 6 && i * 4u + 4u <= len; ++i)
+            memcpy(&args[i], in + i * 4u, 4);
+        switch (op) {
+        case OP_glClear: name = "glClear"; break;
+        case OP_glDrawArrays: name = "glDrawArrays"; break;
+        case OP_glDrawElements: name = "glDrawElements"; break;
+        case OP_glBlitFramebuffer: name = "glBlitFramebuffer"; break;
+        case OP_glCopyTexImage2D: name = "glCopyTexImage2D"; break;
+        default: name = "other"; break;
+        }
+        fprintf(stderr,
+                "GUA-COLOR-TRANS seq=%u ms=%llu fb=%d op=%s before=%u "
+                "after=0 hash_before=%016llx hash_after=%016llx "
+                "program=%d blend=%d eq=0x%x src=0x%x dst=0x%x "
+                "mask=%d%d%d%d scissor=%d box=%d,%d,%d,%d "
+                "clear=%g,%g,%g,%g vp=%d,%d,%d,%d "
+                "args=%u,%u,%u,%u,%u,%u\\n",
+                seq, (unsigned long long)now_ms(), (int)fb, name,
+                fbo_transition_prev_nonblack[fb],
+                (unsigned long long)fbo_transition_prev_hash[fb],
+                (unsigned long long)hash, (int)program, (int)blend,
+                (unsigned)eq, (unsigned)src, (unsigned)dst,
+                color[0], color[1], color[2], color[3],
+                scissor, sc[0], sc[1], sc[2], sc[3],
+                clear[0], clear[1], clear[2], clear[3],
+                vp[0], vp[1], vp[2], vp[3], args[0], args[1], args[2],
+                args[3], args[4], args[5]);
+        fbo_transition_done[fb] = 1;
+        fbo_transition_window_ops[fb] = 256;
+        fbo_transition_until_swap[fb] = pixel_swap_count + 3;
+    }
+    fbo_transition_prev_nonblack[fb] = n;
+    fbo_transition_prev_hash[fb] = hash;
+    (void)total;
+}
+
+static void present_game_texture(int dx, int dy, int dw, int dh)
+{
+    static int source_crop_90 = -1;
+    static int source_crop_logged;
+    float v0 = 0.f, v1 = 1.f;
+    float quad[16];
+    if (source_crop_90 < 0) {
+        const char *crop = getenv("GUACAMELEE_PRESENT_SOURCE_CROP_90");
+        source_crop_90 = crop && strcmp(crop, "0") != 0;
+    }
+    if (source_crop_90 && game_w == 1280 && game_h == 720) {
+        v0 = 90.f / 720.f;
+        v1 = 630.f / 720.f;
+        if (!source_crop_logged) {
+            fprintf(stderr,
+                    "GUA-PRES-SOURCE-CROP90 active src=1280x720 v=0.125..0.875 dst=%dx%d\n",
+                    dw, dh);
+            source_crop_logged = 1;
+        }
+    }
+    quad[0] = -1.f; quad[1] = -1.f; quad[2] = 0.f; quad[3] = v0;
+    quad[4] =  1.f; quad[5] = -1.f; quad[6] = 1.f; quad[7] = v0;
+    quad[8] = -1.f; quad[9] =  1.f; quad[10] = 0.f; quad[11] = v1;
+    quad[12] = 1.f; quad[13] = 1.f; quad[14] = 1.f; quad[15] = v1;
+    void (*p_attrib)(uint32_t, int32_t, uint32_t, uint32_t, int32_t, const void *) =
+        (void *)gl_get("glVertexAttribPointer");
+    void (*p_enable)(uint32_t) = (void *)gl_get("glEnableVertexAttribArray");
+    void (*p_draw)(uint32_t, int32_t, int32_t) = (void *)gl_get("glDrawArrays");
+    void (*p_use)(uint32_t) = (void *)gl_get("glUseProgram");
+    void (*p_viewport)(int32_t,int32_t,int32_t,int32_t) = (void *)gl_get("glViewport");
+    void (*p_disable)(uint32_t) = (void *)gl_get("glDisable");
+    void (*p_mask)(uint8_t,uint8_t,uint8_t,uint8_t) = (void *)gl_get("glColorMask");
+    void (*p_active)(uint32_t) = (void *)gl_get("glActiveTexture");
+    void (*p_bindtex)(uint32_t,uint32_t) = (void *)gl_get("glBindTexture");
+    void (*p_teximage)(uint32_t,int32_t,int32_t,int32_t,int32_t,int32_t,uint32_t,uint32_t,const void *) =
+        (void *)gl_get("glTexImage2D");
+    void (*p_bindbuf)(uint32_t,uint32_t) = (void *)gl_get("glBindBuffer");
+    void (*p_genbuf)(int32_t,uint32_t *) = (void *)gl_get("glGenBuffers");
+    void (*p_data)(uint32_t,intptr_t,const void *,uint32_t) = (void *)gl_get("glBufferData");
+    void (*p_genvao)(int32_t,uint32_t *) = (void *)gl_get("glGenVertexArraysOES");
+    void (*p_bindvao)(uint32_t) = (void *)gl_get("glBindVertexArrayOES");
+    void (*p_clearcolor)(float,float,float,float) = (void *)gl_get("glClearColor");
+    void (*p_clear)(uint32_t) = (void *)gl_get("glClear");
+    void (*p_read)(int32_t,int32_t,int32_t,int32_t,uint32_t,uint32_t,void *) = (void *)gl_get("glReadPixels");
+    void (*attrib)(uint32_t, int32_t, uint32_t, uint32_t, int32_t, const void *) = p_attrib;
+    void (*enable_attr)(uint32_t) = p_enable;
+    void (*draw)(uint32_t, int32_t, int32_t) = p_draw;
+    fprintf(stderr, "GUA-PRESCTX-ENTER ctx=%p texture=%u program=%u attrib=%p enable=%p draw=%p\\n",
+            present_ctx, game_color, splash_prog, (void *)p_attrib,
+            (void *)p_enable, (void *)p_draw);
+    if (!present_prog || !game_color || !p_attrib || !p_enable || !p_draw || !p_use)
+        return;
+    if (!present_vao && p_genvao)
+        p_genvao(1, &present_vao);
+    if (p_bindvao && present_vao)
+        p_bindvao(present_vao);
+    if (!present_vbo && p_genbuf)
+        p_genbuf(1, &present_vbo);
+    if (p_bindbuf && present_vbo)
+        p_bindbuf(GL_ARRAY_BUFFER, present_vbo);
+    if (p_data && present_vbo)
+        p_data(GL_ARRAY_BUFFER, (intptr_t)sizeof(quad), quad, GL_STATIC_DRAW);
+    if (G.glGetError) {
+        uint32_t e = G.glGetError();
+        if (e) fprintf(stderr, "GUA-PRESCTX-VBO err=0x%x\\n", e);
+    }
+    if (real_bind_fb)
+        real_bind_fb(GL_FRAMEBUFFER, 0);
+    if (real_check_fb)
+        fprintf(stderr, "GUA-PRESCTX-FBO status=0x%x\\n",
+                real_check_fb(GL_FRAMEBUFFER));
+    if (getenv("GUACAMELEE_PRESENTER_MAGENTA") && p_clearcolor && p_clear) {
+        p_clearcolor(1.f, 0.f, 1.f, 1.f);
+        p_clear(GL_COLOR_BUFFER_BIT);
+        fprintf(stderr, "GUA-PRESCTX-MAGENTA clear=issued\\n");
+    }
+    if (p_viewport)
+        p_viewport(dx, dy, dw, dh);
+    if (p_disable) {
+        p_disable(GL_DEPTH_TEST);
+        p_disable(GL_CULL_FACE);
+        p_disable(GL_BLEND);
+        p_disable(GL_SCISSOR_TEST);
+    }
+    if (p_mask)
+        p_mask(1u, 1u, 1u, 1u);
+    p_use(present_prog);
+    if (p_active)
+        p_active(GL_TEXTURE0);
+    if (p_bindtex)
+        p_bindtex(GL_TEXTURE_2D, game_color);
+    if (getenv("GUACAMELEE_PRESENT_UPLOAD") && present_upload_pixels && p_teximage)
+        p_teximage(GL_TEXTURE_2D, 0, GL_RGBA, game_w, game_h, 0,
+                   GL_RGBA, GL_UNSIGNED_BYTE, present_upload_pixels);
+    if (G.glGetError)
+        (void)G.glGetError();
+    if (G.glIsTexture)
+        fprintf(stderr, "GUA-PRESCTX-TEX texture=%u visible=%u vao=%u program=%u\\n",
+                game_color, G.glIsTexture(game_color), present_vao, present_prog);
+    fprintf(stderr, "GUA-PRESCTX-LOC pos=%d uv=%d\\n",
+            present_loc_pos, present_loc_uv);
+    enable_attr((uint32_t)present_loc_pos);
+    enable_attr((uint32_t)present_loc_uv);
+    if (G.glGetError) {
+        uint32_t e = G.glGetError();
+        if (e) fprintf(stderr, "GUA-PRESCTX-ENABLE err=0x%x\\n", e);
+    }
+    attrib((uint32_t)present_loc_pos, 2, GL_FLOAT, 0, 16,
+           (const void *)(uintptr_t)0);
+    if (G.glGetError) {
+        uint32_t e = G.glGetError();
+        if (e) fprintf(stderr, "GUA-PRESCTX-ATTRPOS err=0x%x\\n", e);
+    }
+    attrib((uint32_t)present_loc_uv, 2, GL_FLOAT, 0, 16,
+           (const void *)(uintptr_t)8);
+    if (G.glGetError) {
+        uint32_t e = G.glGetError();
+        if (e) fprintf(stderr, "GUA-PRESCTX-ATTR err=0x%x\\n", e);
+    }
+    draw(GL_TRIANGLE_STRIP, 0, 4);
+    if (G.glGetError) {
+        uint32_t err = G.glGetError();
+        if (err)
+            fprintf(stderr, "GUA-PRESCTX-DRAW texture=%u program=%u err=0x%x\\n",
+                    game_color, splash_prog, err);
+    }
+}
+
 static void present_swap(void)
 {
     void (*blit)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
                  int32_t, uint32_t, uint32_t) = G.glBlitFramebuffer;
     int dw, dh, dx, dy;
+    int32_t old_source_read = 0;
+    int32_t old_swap_read = 0, old_swap_draw = 0;
+    unsigned swap = ++pixel_swap_count;
+    uint32_t source_fbo = (present_last_fbo && gl_diag_last_draw_fb) ?
+                          gl_diag_last_draw_fb : game_fbo;
+
+    if (real_get_integerv) {
+        real_get_integerv(GL_READ_FRAMEBUFFER_BINDING, &old_swap_read);
+        real_get_integerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_swap_draw);
+    }
+    fbo_census(swap);
 
     if (!game_fbo) {
         present_draw_cursor(0, 0, win_w, win_h);
@@ -963,7 +2748,17 @@ static void present_swap(void)
     sc[2] = game_w;
     sc[3] = game_h;
 
-    if (present_letterbox) {
+    if (present_letterbox == 2) {
+        if ((long)win_w * (long)game_h >= (long)win_h * (long)game_w) {
+            dw = win_w;
+            dh = (int)((long)game_h * win_w / game_w);
+        } else {
+            dh = win_h;
+            dw = (int)((long)game_w * win_h / game_h);
+        }
+        dx = (win_w - dw) / 2;
+        dy = (win_h - dh) / 2;
+    } else if (present_letterbox) {
         if ((long)win_w * (long)game_h <= (long)win_h * (long)game_w) {
             dw = win_w;
             dh = (int)((long)game_h * win_w / game_w);
@@ -999,21 +2794,92 @@ static void present_swap(void)
     if (scissor_on && G.glDisable)
         G.glDisable(GL_SCISSOR_TEST);
 
+    if (pixel_probe_swap(swap) ||
+        swap == (unsigned)present_hold_swap) {
+        if (gl_diag_last_draw_fb)
+            pixel_probe_target("app", gl_diag_last_draw_fb, game_w, game_h, swap);
+        if (swap == 300 && gl_diag_last_draw_fb == 2)
+            gl_title_full_probe("swap300", 2, game_w, game_h, swap);
+        if (swap == (unsigned)present_hold_swap && source_fbo != game_fbo)
+            gl_title_full_probe("hold-source", source_fbo, game_w, game_h, swap);
+        pixel_probe_target("game", game_fbo, game_w, game_h, swap);
+        if (source_fbo != game_fbo)
+            pixel_probe_target("present-source", source_fbo, game_w, game_h, swap);
+    }
+
     if (real_bind_fb) {
-        real_bind_fb(GL_READ_FRAMEBUFFER, game_fbo);
+        real_bind_fb(GL_READ_FRAMEBUFFER, source_fbo);
         real_bind_fb(GL_DRAW_FRAMEBUFFER, 0);
+    }
+    if (present_set_read_buffer && real_read_buffer) {
+        if (real_get_integerv)
+            real_get_integerv(GL_READ_BUFFER, &old_source_read);
+        real_read_buffer(GL_COLOR_ATTACHMENT0);
+        fprintf(stderr, "GUA-SWAP source-readbuf old=0x%x new=0x8ce0\\n",
+                (unsigned)old_source_read);
     }
     if (G.glViewport)
         G.glViewport(0, 0, win_w, win_h);
-    if (blit)
-        blit(0, 0, game_w, game_h, dx, dy, dx + dw, dy + dh, GL_COLOR_BUFFER_BIT,
-             GL_NEAREST);
+    if (gl_diag_lifecycle_enabled()) {
+        int32_t actual_fb = 0;
+        if (real_get_integerv)
+            real_get_integerv(GL_FRAMEBUFFER_BINDING, &actual_fb);
+        fprintf(stderr, "GUA-SWAP-TIME swap=%u ms=%llu bound-fb=%d game-fbo=%u last-draw-fb=%u source-fb=%u\\n",
+                swap, (unsigned long long)now_ms(), (int)actual_fb,
+                game_fbo, gl_diag_last_draw_fb, source_fbo);
+    }
+    if (G.glFinish)
+        G.glFinish();
+    if (getenv("GUACAMELEE_PRESENT_UPLOAD") && real_bind_fb) {
+        void (*read_pixels)(int32_t,int32_t,int32_t,int32_t,uint32_t,uint32_t,void *) =
+            (void *)gl_get("glReadPixels");
+        size_t bytes = (size_t)game_w * (size_t)game_h * 4u;
+        if (!present_upload_pixels)
+            present_upload_pixels = malloc(bytes);
+        if (present_upload_pixels && read_pixels) {
+            real_bind_fb(GL_READ_FRAMEBUFFER, source_fbo);
+            read_pixels(0, 0, game_w, game_h, GL_RGBA, GL_UNSIGNED_BYTE,
+                        present_upload_pixels);
+            fprintf(stderr, "GUA-PRESCTX-UPLOAD capture=%dx%d bytes=%zu\\n",
+                    game_w, game_h, bytes);
+        }
+    }
+    if (present_ctx && sdl.gl_make_current) {
+        if (sdl.gl_make_current(window, present_ctx) != 0) {
+            fprintf(stderr, "tspgl-srv: presenter MakeCurrent failed: %s\\n",
+                    sdl.get_error());
+            present_ctx = NULL;
+        }
+    }
+    if (present_ctx)
+        present_game_texture(dx, dy, dw, dh);
+    else if (blit)
+        blit(0, 0, game_w, game_h, dx, dy, dx + dw, dy + dh,
+             GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (present_ctx && pixel_probe_swap(swap))
+        pixel_probe_target("present-context", 0, win_w, win_h, swap);
+    if (present_set_read_buffer && real_read_buffer)
+        real_read_buffer((uint32_t)old_source_read);
+    if (pixel_probe_swap(swap))
+        pixel_probe_target("window", 0, win_w, win_h, swap);
+    if (swap == (unsigned)present_hold_swap && source_fbo != game_fbo)
+        gl_title_full_probe("window-held", 0, win_w, win_h, swap);
+    if (swap_finish && G.glFinish)
+        G.glFinish();
     present_draw_cursor(dx, dy, dw, dh);
     sdl.gl_swap(window);
+    if (present_hold_swap > 0 && swap == (unsigned)present_hold_swap) {
+        fprintf(stderr, "GUA-SWAP hold swap=%u seconds=5\\n", swap);
+        sleep(5);
+    }
     tspgl_stage_flip();
     input_soon = 1;
-    if (real_bind_fb)
-        real_bind_fb(GL_FRAMEBUFFER, game_fbo);
+    if (present_ctx && sdl.gl_make_current)
+        sdl.gl_make_current(window, glctx);
+    if (real_bind_fb) {
+        real_bind_fb(GL_READ_FRAMEBUFFER, (uint32_t)old_swap_read);
+        real_bind_fb(GL_DRAW_FRAMEBUFFER, (uint32_t)old_swap_draw);
+    }
     if (G.glViewport)
         G.glViewport(vp[0], vp[1], vp[2], vp[3]);
     if (G.glScissor)
@@ -1116,17 +2982,108 @@ static int handle_client(int fd)
     if (h.len && full_read(fd, in, h.len) != 0)
         goto out_free;
 
+    gl_diag_op(h.op, h.len);
     if (h.op == OP_PING) {
         rc = 0;
     } else if (h.op == OP_EGL_SWAP) {
         splash_live = 0;
+        if (gl_diag_enabled() && !gl_diag_swap) {
+            fprintf(stderr, "GUA-GL first eglSwapBuffers\n");
+            gl_diag_swap = 1;
+        }
         present_swap();
         rc = 0;
     } else {
-        rc = tspgl_dispatch_simple(h.op, (const uint32_t *)in, h.len,
-                                   (uint32_t *)out, &out_n);
+        const uint8_t *dispatch_in = in;
+        uint8_t vp_in[16];
+        gl_diag_fbo_call(h.op, in, h.len);
+        if (zero_viewport && h.op == OP_glViewport && h.len == sizeof(vp_in)) {
+            uint32_t *u;
+            memcpy(vp_in, in, sizeof(vp_in));
+            u = (uint32_t *)vp_in;
+            if (u[2] == 0 && u[3] == 0) {
+                u[2] = (uint32_t)game_w;
+                u[3] = (uint32_t)game_h;
+                dispatch_in = vp_in;
+                fprintf(stderr, "GUA-FBO zero-viewport override %dx%d\\n",
+                        game_w, game_h);
+            }
+        }
+        if (aspect_viewport_fix && h.len == sizeof(vp_in) &&
+            (h.op == OP_glViewport || h.op == OP_glScissor) &&
+            game_w == 1280 && game_h == 720) {
+            uint32_t args[4];
+            memcpy(args, in, sizeof(args));
+            if (args[0] == 0 && args[1] == 90 &&
+                args[2] == 1280 && args[3] == 540) {
+                args[1] = 0;
+                args[3] = 720;
+                memcpy(vp_in, args, sizeof(args));
+                dispatch_in = vp_in;
+                aspect_viewport_fix_hits++;
+                if (aspect_viewport_fix_hits == 1 ||
+                    aspect_viewport_fix_hits % 500 == 0)
+                    fprintf(stderr, "GUA-ASPECT-720 hit=%u %s 0,90,1280,540 -> 0,0,1280,720\\n",
+                            aspect_viewport_fix_hits,
+                            h.op == OP_glViewport ? "viewport" : "scissor");
+            }
+        }
+        if (khr_debug_enabled || getenv("GUACAMELEE_OP_RING")) {
+            uint32_t i, n = h.len / 4u;
+            int32_t x = 0;
+            khr_seq = h.seq;
+            khr_op = h.op;
+            memset(khr_args, 0, sizeof(khr_args));
+            if (n > 6)
+                n = 6;
+            for (i = 0; i < n; ++i)
+                memcpy(&khr_args[i], in + i * 4u, 4);
+            if (real_get_integerv) {
+                real_get_integerv(GL_FRAMEBUFFER_BINDING, &x);
+                khr_fb = x > 0 ? (uint32_t)x : 0;
+                real_get_integerv(GL_CURRENT_PROGRAM, &x);
+                khr_prog = x > 0 ? (uint32_t)x : 0;
+            }
+            op_ring_capture(h.seq, h.op, in, h.len);
+        }
+        title_occlusion_begin(h.op);
+        title_white_color_begin(h.op, h.seq);
+        title_white_texture_begin(h.op, h.seq);
+        gl_diag_pre_draw_finish(h.op, h.seq);
+        if (getenv("GUACAMELEE_TINY_OP_DIAG") && h.seq >= 7000 &&
+            h.seq <= 8200) {
+            uint32_t a0 = h.len >= 4 ? ((const uint32_t *)dispatch_in)[0] : 0;
+            uint32_t a1 = h.len >= 8 ? ((const uint32_t *)dispatch_in)[1] : 0;
+            uint32_t a2 = h.len >= 12 ? ((const uint32_t *)dispatch_in)[2] : 0;
+            uint32_t a3 = h.len >= 16 ? ((const uint32_t *)dispatch_in)[3] : 0;
+            fprintf(stderr, "GUA-TINY-OP seq=%u op=%s(%u) len=%u args=%x,%x,%x,%x\\n",
+                    h.seq, gl_diag_op_name(h.op), h.op, h.len, a0, a1, a2, a3);
+        }
+        rc = tspgl_dispatch_simple(h.op, (const uint32_t *)dispatch_in,
+                                   h.len, (uint32_t *)out, &out_n);
         if (rc != 0)
-            rc = tspgl_dispatch_special(h.op, in, h.len, out, &out_n);
+            rc = tspgl_dispatch_special(h.op, dispatch_in, h.len, out,
+                                         &out_n);
+        title_white_texture_end();
+        title_white_color_end();
+        title_occlusion_end(h.seq);
+        fbo_census_track(h.op, dispatch_in, h.len, out, out_n);
+        fbo_transition_after(h.op, dispatch_in, h.len, h.seq);
+        if (h.op == OP_glGetError && out_n >= 4) {
+            uint32_t err = 0;
+            memcpy(&err, out, 4);
+            op_ring_dump(err);
+        }
+        gl_diag_fbo_result(h.op, out, out_n, rc);
+        gl_error_trace_after(h.op, h.seq);
+        if (h.op == OP_glGetError && out_n >= 4 && deferred_gl_error) {
+            memcpy(out, &deferred_gl_error, 4);
+            deferred_gl_error = 0;
+        }
+        gl_diag_fbo_lifecycle(h.op, in, h.len);
+        gl_diag_fbo_transition(h.op, in, h.len);
+        gl_title_state_snapshot(h.op, in, h.len, h.seq);
+        gl_title_draw_probe(h.op, h.seq);
         if (h.op == OP_glFinish)
             tspgl_stage_flip();
         if (rc != 0) {
@@ -1147,8 +3104,8 @@ static int handle_client(int fd)
                 memset(slog, 0, sizeof(slog));
                 if (getlog)
                     getlog(shader, (int32_t)sizeof(slog) - 1, &slen, slog);
-                fprintf(stderr, "tspgl-srv: COMPILE FAIL id=%u: %s\n", shader,
-                        slog);
+                fprintf(stderr, "GUA-GL shader-compile FAIL id=%u\n", shader);
+                fprintf(stderr, "GUA-GL shader-log: %s\n", slog);
             }
         } else if (h.op == OP_glLinkProgram && h.len >= 4 && G.glGetProgramiv) {
             uint32_t prog;
@@ -1164,7 +3121,25 @@ static int handle_client(int fd)
                 memset(plog, 0, sizeof(plog));
                 if (getlog)
                     getlog(prog, (int32_t)sizeof(plog) - 1, &plen, plog);
-                fprintf(stderr, "tspgl-srv: LINK FAIL id=%u: %s\n", prog, plog);
+                fprintf(stderr, "GUA-GL program-link FAIL id=%u\n", prog);
+                fprintf(stderr, "GUA-GL program-log: %s\n", plog);
+            } else if (gl_diag_enabled() && !gl_diag_link) {
+                fprintf(stderr, "GUA-GL first glLinkProgram success id=%u\n", prog);
+                gl_diag_link = 1;
+            }
+        }
+        if (rc == 0 && gl_diag_enabled() && h.len >= 4) {
+            uint32_t object;
+
+            memcpy(&object, in, 4);
+            if (h.op == OP_glUseProgram && object != 0 && !gl_diag_use) {
+                fprintf(stderr, "GUA-GL first glUseProgram id=%u\n", object);
+                gl_diag_use = 1;
+            } else if ((h.op == OP_glDrawArrays || h.op == OP_glDrawElements) &&
+                       !gl_diag_draw) {
+                fprintf(stderr, "GUA-GL first glDraw %s\n",
+                        gl_diag_op_name(h.op));
+                gl_diag_draw = 1;
             }
         }
     }
@@ -1238,9 +3213,78 @@ int main(void)
     if (eh)
         game_h = atoi(eh);
     if (game_w < 1)
-        game_w = 640;
+        game_w = 1024;
     if (game_h < 1)
-        game_h = 480;
+        game_h = 768;
+    {
+        const char *rd = getenv("TSPGL_DEPTH_ONLY_READ_NONE");
+        depth_only_read_none = rd && atoi(rd) != 0;
+    }
+    {
+        const char *zv = getenv("TSPGL_ZERO_VIEWPORT");
+        zero_viewport = zv && atoi(zv) != 0;
+    }
+    {
+        const char *av = getenv("TSPGL_ASPECT_VIEWPORT_720");
+        aspect_viewport_fix = av && atoi(av) != 0;
+    }
+    {
+        const char *rz = getenv("TSPGL_RB_ZERO_SIZE");
+        rb_zero_size = rz && atoi(rz) != 0;
+    }
+    {
+        const char *ft = getenv("TSPGL_FBO_TEXTURE_FALLBACK");
+        fbo_texture_fallback = ft && atoi(ft) != 0;
+    }
+    {
+        const char *ud = getenv("TSPGL_UNIFY_DEPTH_STENCIL");
+        unify_depth_stencil = ud && atoi(ud) != 0;
+    }
+    {
+        const char *rf = getenv("TSPGL_RB_FORMAT_FIX");
+        rb_format_fix = rf && atoi(rf) != 0;
+    }
+    {
+        const char *pp = getenv("GUACAMELEE_PIXEL_PROBE");
+        const char *pd = getenv("GUACAMELEE_PIXEL_DUMP");
+        const char *pt = getenv("GUACAMELEE_PIXEL_DUMP_TRIGGER_FILE");
+        pixel_probe_enabled = pp && atoi(pp) != 0;
+        pixel_dump_enabled = pd && atoi(pd) != 0;
+        if (pt && *pt)
+            snprintf(pixel_dump_trigger_path, sizeof(pixel_dump_trigger_path),
+                     "%s", pt);
+    }
+    {
+        const char *or = getenv("GUACAMELEE_OP_RING");
+        if (or && atoi(or) != 0)
+            fprintf(stderr, "GUA-RING enabled\\n");
+    }
+    {
+        const char *fc = getenv("GUACAMELEE_FBO_CENSUS");
+        fbo_census_enabled = fc && atoi(fc) != 0;
+    }
+    {
+        const char *sf = getenv("TSPGL_SWAP_FINISH");
+        swap_finish = sf && atoi(sf) != 0;
+    }
+    {
+        const char *si = getenv("TSPGL_SWAP_INTERVAL");
+        swap_interval = si ? atoi(si) : 0;
+        if (swap_interval < 0)
+            swap_interval = 0;
+    }
+    {
+        const char *plf = getenv("TSPGL_PRESENT_LAST_FBO");
+        present_last_fbo = plf && atoi(plf) != 0;
+    }
+    {
+        const char *prs = getenv("TSPGL_PRESENT_SET_READ_BUFFER");
+        present_set_read_buffer = prs && atoi(prs) != 0;
+    }
+    {
+        const char *phs = getenv("TSPGL_HOLD_SWAP");
+        present_hold_swap = phs ? atoi(phs) : 0;
+    }
     {
         const char *mode = getenv("TSPGL_PRESENT");
 #ifdef TSPGL_DEFAULT_LETTERBOX
@@ -1249,12 +3293,14 @@ int main(void)
         if (mode != NULL) {
             if (strcmp(mode, "letterbox") == 0 || strcmp(mode, "fit") == 0)
                 present_letterbox = 1;
+            else if (strcmp(mode, "crop") == 0)
+                present_letterbox = 2;
             else if (strcmp(mode, "stretch") == 0 || strcmp(mode, "fill") == 0)
                 present_letterbox = 0;
         }
-        fprintf(stderr, "tspgl-srv: present %s %dx%d -> %dx%d\n",
-                present_letterbox ? "letterbox" : "stretch", game_w, game_h,
-                win_w, win_h);
+        fprintf(stderr, "tspgl-srv: present %s %dx%d -> %dx%d\\n",
+                present_letterbox == 2 ? "crop" : (present_letterbox ? "letterbox" : "stretch"),
+                game_w, game_h, win_w, win_h);
     }
 
     frame_map = open_frame();
@@ -1287,7 +3333,7 @@ int main(void)
     sdl.gl_set_attr(SDL_GL_DOUBLEBUFFER, 1);
     sdl.gl_set_attr(SDL_GL_DEPTH_SIZE, 24);
     sdl.gl_set_attr(SDL_GL_STENCIL_SIZE, 8);
-    sdl.gl_set_attr(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    sdl.gl_set_attr(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     sdl.gl_set_attr(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     sdl.gl_set_attr(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 
@@ -1301,24 +3347,39 @@ int main(void)
     }
     glctx = sdl.gl_create_context(window);
     if (!glctx) {
-        fprintf(stderr, "tspgl-srv: GLES3 context failed (%s), try ES2\n",
+        fprintf(stderr, "tspgl-srv: GLES2 CreateContext failed (%s)\n",
                 sdl.get_error());
-        sdl.gl_set_attr(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-        sdl.gl_set_attr(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-        glctx = sdl.gl_create_context(window);
-    }
-    if (!glctx) {
-        fprintf(stderr, "tspgl-srv: CreateContext: %s\n", sdl.get_error());
         return 1;
     }
     if (sdl.gl_make_current(window, glctx) != 0) {
-        fprintf(stderr, "tspgl-srv: MakeCurrent: %s\n", sdl.get_error());
+        fprintf(stderr, "tspgl-srv: MakeCurrent: %s\\n", sdl.get_error());
         return 1;
     }
+    if (sdl.gl_set_attr && sdl.gl_create_context) {
+        if (sdl.gl_set_attr(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1) != 0)
+            fprintf(stderr, "tspgl-srv: enabling GL context sharing failed: %s\\n",
+                    sdl.get_error());
+        present_ctx = sdl.gl_create_context(window);
+        sdl.gl_set_attr(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
+        if (!present_ctx)
+            fprintf(stderr, "tspgl-srv: shared presenter context unavailable: %s\\n",
+                    sdl.get_error());
+        else
+            fprintf(stderr, "tspgl-srv: shared presenter GLES context created\\n");
+        if (present_ctx && sdl.gl_make_current(window, present_ctx) == 0) {
+            if (present_program_setup() != 0)
+                fprintf(stderr, "tspgl-srv: presenter-local shader setup failed\\n");
+            sdl.gl_make_current(window, glctx);
+        }
+        sdl.gl_make_current(window, glctx);
+    }
     if (sdl.gl_set_swap)
-        sdl.gl_set_swap(0);
+        sdl.gl_set_swap(swap_interval);
     sdl.show_cursor(0);
-    fprintf(stderr, "tspgl-srv: window %dx%d GL context ok\n", win_w, win_h);
+    fprintf(stderr, "tspgl-srv: window %dx%d GL context ok driver=%s swap_interval=%d\n",
+            win_w, win_h,
+            sdl.get_current_video_driver ? sdl.get_current_video_driver() : "unknown",
+            swap_interval);
 
     memset(&G, 0, sizeof(G));
     tspgl_load_simple(gl_get);
@@ -1333,6 +3394,8 @@ int main(void)
         G.glBindVertexArray = gl_get("glBindVertexArrayOES");
     if (!G.glIsVertexArray)
         G.glIsVertexArray = gl_get("glIsVertexArrayOES");
+    fbo_format_matrix();
+    khr_debug_setup();
     {
         const uint8_t *(*gs)(uint32_t) = (void *)G.glGetString;
         const char *ven = "", *ren = "", *ver = "", *ext = "";
@@ -1377,10 +3440,19 @@ int main(void)
         splash_present();
         splash_present();
     }
+    if (!present_ctx && !splash_prog && present_program_setup() != 0)
+        fprintf(stderr, "tspgl-srv: presenter shader setup failed\\n");
 
     if (create_game_fbo() != 0) {
-        fprintf(stderr, "tspgl-srv: FBO failed, default framebuffer\n");
+        fprintf(stderr, "tspgl-srv: FBO failed, default framebuffer\\n");
         game_fbo = 0;
+    }
+    if (present_ctx && sdl.gl_make_current(window, present_ctx) == 0) {
+        uint8_t (*p_is_texture)(uint32_t) = (void *)gl_get("glIsTexture");
+        presenter_shared = p_is_texture && p_is_texture(game_color) ? 1 : 0;
+        fprintf(stderr, "GUA-PRESCTX-SHARE texture=%u shared=%d\\n",
+                game_color, presenter_shared);
+        sdl.gl_make_current(window, glctx);
     }
     real_bind_fb = G.glBindFramebuffer;
     if (game_fbo)
@@ -1391,6 +3463,7 @@ int main(void)
     G.glCheckFramebufferStatus = wrap_check_fb;
     real_draw_buffers = (void (*)(int32_t, const uint32_t *))(uintptr_t)gl_get(
         "glDrawBuffers");
+    real_read_buffer = (void (*)(uint32_t))(uintptr_t)gl_get("glReadBuffer");
     real_tex_image = (void *)G.glTexImage2D;
     if (real_tex_image)
         G.glTexImage2D = (void *)(uintptr_t)wrap_tex_image2d;
@@ -1541,6 +3614,8 @@ int main(void)
 done:
     unlink("/tmp/nfsmw.present.ready");
     unlink(TSPGL_SOCK);
+    if (present_ctx)
+        sdl.gl_delete_context(present_ctx);
     if (glctx)
         sdl.gl_delete_context(glctx);
     if (window)
