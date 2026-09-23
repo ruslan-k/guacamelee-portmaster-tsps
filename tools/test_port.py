@@ -97,6 +97,14 @@ def main() -> int:
     assert roms_candidate in launcher_source
     assert launcher_source.index(roms_candidate) < launcher_source.index(legacy_candidate)
     assert 'GUACAMELEE_GL_DIAG' in launcher_source
+    assert 'SDL_OFFSCREEN_WIDTH="${GUACAMELEE_SDL_OFFSCREEN_WIDTH:-$GUACAMELEE_WIDTH}"' in launcher_source
+    assert 'SDL_OFFSCREEN_HEIGHT="${GUACAMELEE_SDL_OFFSCREEN_HEIGHT:-$GUACAMELEE_HEIGHT}"' in launcher_source
+    assert 'TSPGL_ASPECT_VIEWPORT_720="${GUACAMELEE_ASPECT_VIEWPORT_720:-1}"' in launcher_source
+    assert 'GUA-ASPECT-720 hit=' in server_main_source
+    assert 'GUACAMELEE_PRESENT_SOURCE_CROP_90="${GUACAMELEE_PRESENT_SOURCE_CROP_90:-1}"' in launcher_source
+    assert 'GUA-PRES-SOURCE-CROP90 active src=1280x720' in server_main_source
+    assert 'v0 = 90.f / 720.f' in server_main_source
+    assert 'v1 = 630.f / 720.f' in server_main_source
     assert 'GUA-GL shader-final:' in server_source
     assert 'GUA-GL shader-compile FAIL' in server_main_source
     assert 'GUA-GL program-link FAIL' in server_main_source

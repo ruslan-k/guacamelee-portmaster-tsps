@@ -348,6 +348,8 @@ static void (*real_draw_buffers)(int32_t, const uint32_t *);
 static void (*real_read_buffer)(uint32_t);
 static int depth_only_read_none;
 static int zero_viewport;
+static int aspect_viewport_fix;
+static unsigned aspect_viewport_fix_hits;
 static unsigned gl_diag_lifecycle_ops;
 static uint32_t gl_diag_last_draw_fb;
 static void (*real_tex_image)(uint32_t, int32_t, int32_t, int32_t, int32_t,
@@ -2249,7 +2251,7 @@ static void pixel_probe_target(const char *stage, uint32_t fb, int w, int h,
             }
         }
     }
-    if (pixel_dump_enabled && swap == 10) {
+    if (pixel_dump_enabled && (swap == 10 || swap == 600)) {
         size_t full_bytes = (size_t)w * (size_t)h * 4u;
         uint8_t *full = malloc(full_bytes);
         if (full) {
@@ -2296,7 +2298,7 @@ static void pixel_probe_target(const char *stage, uint32_t fb, int w, int h,
 static int pixel_probe_swap(unsigned swap)
 {
     return swap == 1 || swap == 2 || swap == 3 || swap == 10 || swap == 30 ||
-           swap == 300;
+           swap == 300 || swap == 600;
 }
 
 static void fbo_census_track(uint32_t op, const uint8_t *in, uint32_t len,
@@ -2566,10 +2568,28 @@ static void fbo_transition_after(uint32_t op, const uint8_t *in,
 
 static void present_game_texture(int dx, int dy, int dw, int dh)
 {
-    static const float quad[] = {
-        -1.f, -1.f, 0.f, 0.f, 1.f, -1.f, 1.f, 0.f,
-        -1.f,  1.f, 0.f, 1.f, 1.f,  1.f, 1.f, 1.f,
-    };
+    static int source_crop_90 = -1;
+    static int source_crop_logged;
+    float v0 = 0.f, v1 = 1.f;
+    float quad[16];
+    if (source_crop_90 < 0) {
+        const char *crop = getenv("GUACAMELEE_PRESENT_SOURCE_CROP_90");
+        source_crop_90 = crop && strcmp(crop, "0") != 0;
+    }
+    if (source_crop_90 && game_w == 1280 && game_h == 720) {
+        v0 = 90.f / 720.f;
+        v1 = 630.f / 720.f;
+        if (!source_crop_logged) {
+            fprintf(stderr,
+                    "GUA-PRES-SOURCE-CROP90 active src=1280x720 v=0.125..0.875 dst=%dx%d\n",
+                    dw, dh);
+            source_crop_logged = 1;
+        }
+    }
+    quad[0] = -1.f; quad[1] = -1.f; quad[2] = 0.f; quad[3] = v0;
+    quad[4] =  1.f; quad[5] = -1.f; quad[6] = 1.f; quad[7] = v0;
+    quad[8] = -1.f; quad[9] =  1.f; quad[10] = 0.f; quad[11] = v1;
+    quad[12] = 1.f; quad[13] = 1.f; quad[14] = 1.f; quad[15] = v1;
     void (*p_attrib)(uint32_t, int32_t, uint32_t, uint32_t, int32_t, const void *) =
         (void *)gl_get("glVertexAttribPointer");
     void (*p_enable)(uint32_t) = (void *)gl_get("glEnableVertexAttribArray");
@@ -2972,6 +2992,25 @@ static int handle_client(int fd)
                         game_w, game_h);
             }
         }
+        if (aspect_viewport_fix && h.len == sizeof(vp_in) &&
+            (h.op == OP_glViewport || h.op == OP_glScissor) &&
+            game_w == 1280 && game_h == 720) {
+            uint32_t args[4];
+            memcpy(args, in, sizeof(args));
+            if (args[0] == 0 && args[1] == 90 &&
+                args[2] == 1280 && args[3] == 540) {
+                args[1] = 0;
+                args[3] = 720;
+                memcpy(vp_in, args, sizeof(args));
+                dispatch_in = vp_in;
+                aspect_viewport_fix_hits++;
+                if (aspect_viewport_fix_hits == 1 ||
+                    aspect_viewport_fix_hits % 500 == 0)
+                    fprintf(stderr, "GUA-ASPECT-720 hit=%u %s 0,90,1280,540 -> 0,0,1280,720\\n",
+                            aspect_viewport_fix_hits,
+                            h.op == OP_glViewport ? "viewport" : "scissor");
+            }
+        }
         if (khr_debug_enabled || getenv("GUACAMELEE_OP_RING")) {
             uint32_t i, n = h.len / 4u;
             int32_t x = 0;
@@ -3167,6 +3206,10 @@ int main(void)
     {
         const char *zv = getenv("TSPGL_ZERO_VIEWPORT");
         zero_viewport = zv && atoi(zv) != 0;
+    }
+    {
+        const char *av = getenv("TSPGL_ASPECT_VIEWPORT_720");
+        aspect_viewport_fix = av && atoi(av) != 0;
     }
     {
         const char *rz = getenv("TSPGL_RB_ZERO_SIZE");
